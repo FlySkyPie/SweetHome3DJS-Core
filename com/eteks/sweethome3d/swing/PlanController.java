@@ -32,7 +32,7 @@ import javax.swing.undo.CannotUndoException;
 import javax.swing.undo.UndoableEdit;
 import javax.swing.undo.UndoableEditSupport;
 
-import com.eteks.sweethome3d.model.Plan;
+import com.eteks.sweethome3d.model.Home;
 import com.eteks.sweethome3d.model.UserPreferences;
 import com.eteks.sweethome3d.model.Wall;
 
@@ -40,11 +40,11 @@ import com.eteks.sweethome3d.model.Wall;
  * A MVC controller for the plan view.
  * @author Emmanuel Puybaret
  */
-public class PlanController implements Controller {
+public class PlanController {
   public enum Mode {WALL_CREATION, SELECTION}
   
   private JComponent          planView;
-  private Plan                plan;
+  private Home                home;
   private UserPreferences     preferences;
   private UndoableEditSupport undoSupport;
   private ResourceBundle      resource;
@@ -63,18 +63,18 @@ public class PlanController implements Controller {
 
   /**
    * Creates the controller of plan view. 
-   * @param plan        the plan edited by this controller and its view
+   * @param home        the home plan edited by this controller and its view
    * @param preferences the preferences of the application
    * @param undoSupport undo support to post changes on plan by this controller
    */
-  public PlanController(Plan plan, UserPreferences preferences, 
+  public PlanController(Home home, UserPreferences preferences, 
                         UndoableEditSupport undoSupport) {
-    this.plan = plan;
+    this.home = home;
     this.preferences = preferences;
     this.undoSupport = undoSupport;
     this.resource  = ResourceBundle.getBundle(PlanController.class.getName());
     // Create view
-    this.planView = new PlanComponent(plan, preferences, this);
+    this.planView = new PlanComponent(home, preferences, this);
     // Initialize states
     this.selectionState = new SelectionState();
     this.selectionMoveState = new SelectionMoveState();
@@ -237,18 +237,16 @@ public class PlanController implements Controller {
                              float xEnd, float yEnd,
                              Wall wallStartAtStart,
                              Wall wallEndAtStart) {
-    final int defaultColor = 0xFFFFFF; // White
     // Create a new wall
     Wall newWall = new Wall(xStart, yStart, xEnd, yEnd, 
-        defaultColor, defaultColor, 
         this.preferences.getDefaultThickness());
-    this.plan.addWall(newWall);
+    this.home.addWall(newWall);
     if (wallStartAtStart != null) {
-      this.plan.setWallAtStart(newWall, wallStartAtStart);
-      this.plan.setWallAtStart(wallStartAtStart, newWall);
+      this.home.setWallAtStart(newWall, wallStartAtStart);
+      this.home.setWallAtStart(wallStartAtStart, newWall);
     } else if (wallEndAtStart != null) {
-      this.plan.setWallAtStart(newWall, wallEndAtStart);
-      this.plan.setWallAtEnd(wallEndAtStart, newWall);
+      this.home.setWallAtStart(newWall, wallEndAtStart);
+      this.home.setWallAtEnd(wallEndAtStart, newWall);
     }        
     return newWall;
   }
@@ -260,48 +258,36 @@ public class PlanController implements Controller {
   private void joinNewWallEndToWall(Wall wall, JoinedWall joinedWall, 
                                  Wall wallStartAtEnd, Wall wallEndAtEnd) {
     if (wallStartAtEnd != null) {
-      this.plan.setWallAtEnd(wall, wallStartAtEnd);
-      this.plan.setWallAtStart(wallStartAtEnd, wall);
+      this.home.setWallAtEnd(wall, wallStartAtEnd);
+      this.home.setWallAtStart(wallStartAtEnd, wall);
       // Update joinedWall data created by postAddWall
       joinedWall.setWallAtEnd(wallStartAtEnd);
       joinedWall.setJoinedAtStartOfWallAtEnd(true);
       // Make wall end at the exact same position as wallAtEnd start point
-      this.plan.moveWallEndPointTo(wall, wallStartAtEnd.getXStart(),
+      this.home.moveWallEndPointTo(wall, wallStartAtEnd.getXStart(),
           wallStartAtEnd.getYStart());
     } else if (wallEndAtEnd != null) {
-      this.plan.setWallAtEnd(wall, wallEndAtEnd);
-      this.plan.setWallAtEnd(wallEndAtEnd, wall);
+      this.home.setWallAtEnd(wall, wallEndAtEnd);
+      this.home.setWallAtEnd(wallEndAtEnd, wall);
       // Update joinedWall data created by postAddWall
       joinedWall.setWallAtEnd(wallEndAtEnd);
       joinedWall.setJoinedAtEndOfWallAtEnd(true);
       // Make wall end at the exact same position as wallAtEnd end point
-      this.plan.moveWallEndPointTo(wall, wallEndAtEnd.getXEnd(),
+      this.home.moveWallEndPointTo(wall, wallEndAtEnd.getXEnd(),
           wallEndAtEnd.getYEnd());
     }
   }
   
   /**
-   * Returns the wall at (<code>x</code>, <code>y</code>) 
-   * point different from <code>ignoredWall</code>.
-   */
-  private Wall getWallAt(float x, float y, Wall ignoredWall) {
-    for (Wall wall : this.plan.getWalls()) {
-      if (wall != ignoredWall
-          && ((PlanComponent)getView()).containsWallAt(wall, x, y)) 
-        return wall;
-    }
-    return null;
-  }
-
-  /**
    * Returns the wall at (<code>x</code>, <code>y</code>) point,  
    * which has a start point not joined to any wall. 
    */
   private Wall getWallStartAt(float x, float y, Wall ignoredWall) {
-    for (Wall wall : this.plan.getWalls()) {
+    float margin = 2 / ((PlanComponent)getView()).getScale();
+    for (Wall wall : this.home.getWalls()) {
       if (wall != ignoredWall
           && wall.getWallAtStart() == null
-          && ((PlanComponent)getView()).containsWallStartAt(wall, x, y)) 
+          && wall.containsWallStartAt(x, y, margin)) 
         return wall;
     }
     return null;
@@ -312,132 +298,148 @@ public class PlanController implements Controller {
    * which has a end point not joined to any wall. 
    */
   private Wall getWallEndAt(float x, float y, Wall ignoredWall) {
-    for (Wall wall : this.plan.getWalls()) {
+    float margin = 2 / ((PlanComponent)getView()).getScale();
+    for (Wall wall : this.home.getWalls()) {
       if (wall != ignoredWall
           && wall.getWallAtEnd() == null
-          && ((PlanComponent)getView()).containsWallEndAt(wall, x, y)) 
+          && wall.containsWallEndAt(x, y, margin)) 
         return wall;
     }
     return null;
   }
 
   /**
-   * Deletes selected walls in plan and record it as an undoable operation.
+   * Returns the item at (<code>x</code>, <code>y</code>) point.
    */
-  private void deleteSelectedWalls() {
-    List<Wall> selectedWalls = ((PlanComponent)getView()).getSelectedWalls();
-    if (!selectedWalls.isEmpty()) {
+  Object getItemAt(float x, float y) {
+    float margin = 2 / ((PlanComponent)getView()).getScale();
+    for (Wall wall : this.home.getWalls()) {
+      if (wall.containsPoint(x, y, margin)) 
+        return wall;
+    }
+    return null;
+  }
+
+  /**
+   * Deletes selection in plan and record it as an undoable operation.
+   */
+  private void deleteSelectedItems() {
+    List<Object> selectedItems = this.home.getSelectedItems();
+    if (!selectedItems.isEmpty()) {
       // First post to undo support that walls are deleted, 
       // otherwise data about joined walls can't be stored 
-      postDeleteWalls(selectedWalls);
+      postDeleteItems(selectedItems);
       // Then delete walls from plan
-      for (Wall wall : selectedWalls) {
-        this.plan.deleteWall(wall);
+      for (Object item : selectedItems) {
+        if (item instanceof Wall) {
+          this.home.deleteWall((Wall)item);
+        }
       }
-      deselectAll();
     }      
   }
 
   /**
-   * Moves and shows selected walls in plan component of (<code>dx</code>,
+   * Moves and shows selected items in plan component of (<code>dx</code>,
    * <code>dy</code>) units and record it as undoable operation.
    */
-  private void moveAndShowSelectedWalls(float dx, float dy) {
-    List<Wall> selectedWalls = ((PlanComponent)getView()).getSelectedWalls();
-    if (!selectedWalls.isEmpty()) {
-      moveWalls(selectedWalls, dx, dy);
-      ((PlanComponent)getView()).ensureSelectionIsVisible();
-      postWallsMove(selectedWalls, dx, dy);
+  private void moveAndShowSelectedItems(float dx, float dy) {
+    List<Object> selectedItems = this.home.getSelectedItems();
+    if (!selectedItems.isEmpty()) {
+      moveItems(selectedItems, dx, dy);
+      ((PlanComponent)getView()).makeSelectionVisible();
+      postItemsMove(selectedItems, dx, dy);
     }
   }
 
   /**
-   * Moves <code>walls</code> in plan component of (<code>dx</code>,
+   * Moves <code>items</code> of (<code>dx</code>,
    * <code>dy</code>) units.
    */
-  private void moveWalls(List<Wall> walls, float dx, float dy) {
-    for (Wall wall : walls) {        
-      this.plan.moveWallStartPointTo(wall, 
-          wall.getXStart() + dx, wall.getYStart() + dy);
-      this.plan.moveWallEndPointTo(wall, 
-          wall.getXEnd() + dx, wall.getYEnd() + dy);
-      Wall wallAtStart = wall.getWallAtStart();
-      // If wall is joined to a wall at its start 
-      // and this wall doesn't belong to the list of moved walls
-      if (wallAtStart != null && !walls.contains(wallAtStart)) {
-        // Move the wall start point or end point
-        if (wallAtStart.getWallAtStart() == wall) {
-          this.plan.moveWallStartPointTo(wallAtStart, 
-              wallAtStart.getXStart() + dx, 
-              wallAtStart.getYStart() + dy);
-        } else if (wallAtStart.getWallAtEnd() == wall) {
-          this.plan.moveWallEndPointTo(wallAtStart, 
-              wallAtStart.getXEnd() + dx, 
-              wallAtStart.getYEnd() + dy);
+  private void moveItems(List<Object> items, float dx, float dy) {
+    for (Object item : items) {
+      if (item instanceof Wall) {
+        Wall wall = (Wall)item;
+        this.home.moveWallStartPointTo(wall, 
+            wall.getXStart() + dx, wall.getYStart() + dy);
+        this.home.moveWallEndPointTo(wall, 
+            wall.getXEnd() + dx, wall.getYEnd() + dy);
+        Wall wallAtStart = wall.getWallAtStart();
+        // If wall is joined to a wall at its start 
+        // and this wall doesn't belong to the list of moved walls
+        if (wallAtStart != null && !items.contains(wallAtStart)) {
+          // Move the wall start point or end point
+          if (wallAtStart.getWallAtStart() == wall) {
+            this.home.moveWallStartPointTo(wallAtStart, 
+                wallAtStart.getXStart() + dx, 
+                wallAtStart.getYStart() + dy);
+          } else if (wallAtStart.getWallAtEnd() == wall) {
+            this.home.moveWallEndPointTo(wallAtStart, 
+                wallAtStart.getXEnd() + dx, 
+                wallAtStart.getYEnd() + dy);
+          }
         }
-      }
-      Wall wallAtEnd = wall.getWallAtEnd();
-      // If wall is joined to a wall at its end  
-      // and this wall doesn't belong to the list of moved walls
-      if (wallAtEnd != null && !walls.contains(wallAtEnd)) {
-        // Move the wall start point or end point
-        if (wallAtEnd.getWallAtStart() == wall) {
-          this.plan.moveWallStartPointTo(wallAtEnd, 
-              wallAtEnd.getXStart() + dx, 
-              wallAtEnd.getYStart() + dy);
-        } else if (wallAtEnd.getWallAtEnd() == wall) {
-          this.plan.moveWallEndPointTo(wallAtEnd, 
-              wallAtEnd.getXEnd() + dx, 
-              wallAtEnd.getYEnd() + dy);
+        Wall wallAtEnd = wall.getWallAtEnd();
+        // If wall is joined to a wall at its end  
+        // and this wall doesn't belong to the list of moved walls
+        if (wallAtEnd != null && !items.contains(wallAtEnd)) {
+          // Move the wall start point or end point
+          if (wallAtEnd.getWallAtStart() == wall) {
+            this.home.moveWallStartPointTo(wallAtEnd, 
+                wallAtEnd.getXStart() + dx, 
+                wallAtEnd.getYStart() + dy);
+          } else if (wallAtEnd.getWallAtEnd() == wall) {
+            this.home.moveWallEndPointTo(wallAtEnd, 
+                wallAtEnd.getXEnd() + dx, 
+                wallAtEnd.getYEnd() + dy);
+          }
         }
       }
     }
   }
   
   /**
-   * Selects <code>walls</code> walls and make them visible at screen.
+   * Selects <code>items</code> and make them visible at screen.
    */
-  private void selectAndShowWalls(List<Wall> walls) {
-    selectWalls(walls);
-    ((PlanComponent)getView()).ensureSelectionIsVisible();
+  private void selectAndShowItems(List<? extends Object> items) {
+    selectItems(items);
+    ((PlanComponent)getView()).makeSelectionVisible();
   }
   
   /**
-   * Selects <code>walls</code> walls.
+   * Selects <code>items</code>.
    */
-  private void selectWalls(List<Wall> walls) {
-    ((PlanComponent)getView()).setSelectedWalls(walls);
+  private void selectItems(List<? extends Object> items) {
+    this.home.setSelectedItems(items);
   }
   
   /**
-   * Selects only a given <code>wall</code>.
+   * Selects only a given <code>item</code>.
    */
-  private void selectWall(Wall wall) {
-    selectWalls(Arrays.asList(new Wall [] {wall}));
+  private void selectItem(Object item) {
+    selectItems(Arrays.asList(new Object [] {item}));
   }
 
   /**
    * Deselect all walls in plan. 
    */
   private void deselectAll() {
-    List<Wall> emptyList = Collections.emptyList();
-    selectWalls(emptyList);
+    selectItems(Collections.emptyList());
   }
 
   /**
    * Posts an undoable new wall operation, about <code>newWall</code>.
    */
-  private JoinedWall postAddWall(Wall newWall, List<Wall> oldSelection) {
+  private JoinedWall postAddWall(Wall newWall, List<Object> oldSelection) {
     // Retrieve data about joined walls to newWall
     final JoinedWall [] joinedNewWall = {new JoinedWall(newWall)};
-    final Wall [] oldSelectedWalls = 
-      oldSelection.toArray(new Wall [oldSelection.size()]);
+    final Object [] oldSelectedItems = 
+      oldSelection.toArray(new Object [oldSelection.size()]);
     UndoableEdit undoableEdit = new AbstractUndoableEdit() {      
       @Override
       public void undo() throws CannotUndoException {
         super.undo();
         doDeleteWalls(joinedNewWall);
-        selectAndShowWalls(Arrays.asList(oldSelectedWalls));
+        selectAndShowItems(Arrays.asList(oldSelectedItems));
       }
       
       @Override
@@ -462,38 +464,44 @@ public class PlanController implements Controller {
   private void doAddAndShowWalls(JoinedWall [] joinedNewWalls) {
     // First add all walls to home
     for (JoinedWall joinedNewWall : joinedNewWalls) {
-      this.plan.addWall(joinedNewWall.getWall());
+      this.home.addWall(joinedNewWall.getWall());
     }
     // Then join them to each other if necessary
     for (JoinedWall joinedNewWall : joinedNewWalls) {
       Wall wall = joinedNewWall.getWall();
       Wall wallAtStart = joinedNewWall.getWallAtStart();
       if (wallAtStart != null) {
-        this.plan.setWallAtStart(wall, wallAtStart);
+        this.home.setWallAtStart(wall, wallAtStart);
         if (joinedNewWall.isJoinedAtEndOfWallAtStart()) {
-          this.plan.setWallAtEnd(wallAtStart, wall);
+          this.home.setWallAtEnd(wallAtStart, wall);
         } else if (joinedNewWall.isJoinedAtStartOfWallAtStart()) {
-          this.plan.setWallAtStart(wallAtStart, wall);
+          this.home.setWallAtStart(wallAtStart, wall);
         }
       }
       Wall wallAtEnd = joinedNewWall.getWallAtEnd();
       if (wallAtEnd != null) {
-        this.plan.setWallAtEnd(wall, wallAtEnd);
+        this.home.setWallAtEnd(wall, wallAtEnd);
         if (joinedNewWall.isJoinedAtStartOfWallAtEnd()) {
-          this.plan.setWallAtStart(wallAtEnd, wall);
+          this.home.setWallAtStart(wallAtEnd, wall);
         } else if (joinedNewWall.isJoinedAtEndOfWallAtEnd()) {
-          this.plan.setWallAtEnd(wallAtEnd, wall);
+          this.home.setWallAtEnd(wallAtEnd, wall);
         }
       }
     }      
     // Select added walls
-    selectAndShowWalls(JoinedWall.getWalls(joinedNewWalls));
+    selectAndShowItems(JoinedWall.getWalls(joinedNewWalls));
   }
 
   /**
-   * Posts an undoable delete wall operation, about <code>deletedWalls</code>.
+   * Posts an undoable delete items operation, about <code>deletedItems</code>.
    */
-  private void postDeleteWalls(List<Wall> deletedWalls) {
+  private void postDeleteItems(List<Object> deletedItems) {
+    List<Wall> deletedWalls = new ArrayList<Wall>();
+    for (Object item : deletedItems) {
+      if (item instanceof Wall) {
+        deletedWalls.add((Wall)item);
+      }
+    }
     // Get joined walls data for undo operation
     final JoinedWall [] joinedDeletedWalls = 
       JoinedWall.getJoinedWalls(deletedWalls);
@@ -523,32 +531,31 @@ public class PlanController implements Controller {
    */
   private void doDeleteWalls(JoinedWall [] joinedDeletedWalls) {
     for (JoinedWall joinedWall : joinedDeletedWalls) {
-      this.plan.deleteWall(joinedWall.getWall());
+      this.home.deleteWall(joinedWall.getWall());
     }
-    deselectAll();
   }
 
   /**
    * Posts an undoable operation of a (<code>dx</code>, <code>dy</code>) move 
-   * of <code>movedWalls</code>.
+   * of <code>movedItems</code>.
    */
-  private void postWallsMove(List<Wall> movedWalls, 
+  private void postItemsMove(List<Object> movedItems, 
                              final float dx, final float dy) {
     if (dx != 0 || dy != 0) {
       // Store the moved walls in an array
-      final Wall [] wallsArray = 
-        movedWalls.toArray(new Wall [movedWalls.size()]);
+      final Object [] itemsArray = 
+        movedItems.toArray(new Object [movedItems.size()]);
       UndoableEdit undoableEdit = new AbstractUndoableEdit() {      
         @Override
         public void undo() throws CannotUndoException {
           super.undo();
-          doMoveAndShowWalls(wallsArray, -dx, -dy);       
+          doMoveAndShowItems(itemsArray, -dx, -dy);       
         }
         
         @Override
         public void redo() throws CannotRedoException {
           super.redo();
-          doMoveAndShowWalls(wallsArray, dx, dy);   
+          doMoveAndShowItems(itemsArray, dx, dy);   
         }      
   
         @Override
@@ -561,14 +568,14 @@ public class PlanController implements Controller {
   }
 
   /** 
-   * Moves <code>movedWalls</code> of (<code>dx</code>, <code>dy</code>) pixels, 
+   * Moves <code>movedItems</code> of (<code>dx</code>, <code>dy</code>) pixels, 
    * selects them and make them visible.
    */
-  private void doMoveAndShowWalls(Wall [] movedWalls, 
+  private void doMoveAndShowItems(Object [] movedItems, 
                                   float dx, float dy) {
-    List<Wall> wallsList = Arrays.asList(movedWalls);
-    moveWalls(wallsList, dx, dy);   
-    selectAndShowWalls(wallsList);
+    List<Object> itemsList = Arrays.asList(movedItems);
+    moveItems(itemsList, dx, dy);   
+    selectAndShowItems(itemsList);
   }
 
   /**
@@ -814,19 +821,19 @@ public class PlanController implements Controller {
 
     @Override
     public void deleteSelection() {
-      deleteSelectedWalls();
+      deleteSelectedItems();
     }
 
     @Override
     public void moveSelection(float dx, float dy) {
-      moveAndShowSelectedWalls(dx, dy);
+      moveAndShowSelectedItems(dx, dy);
     }
 
     @Override
     public void pressMouse(float x, float y, int clickCount,
                            boolean shiftDown) {
-      // If shift isn't pressed, and a wall is under cursor position
-      if (!shiftDown && getWallAt(x, y, null) != null) {
+      // If shift isn't pressed, and an item is under cursor position
+      if (!shiftDown && getItemAt(x, y) != null) {
         // Change state to SelectionMoveState
         setState(getSelectionMoveState());
       } else {
@@ -856,21 +863,21 @@ public class PlanController implements Controller {
       this.xLastMouseMove = getXLastMousePress();
       this.yLastMouseMove = getYLastMousePress();
       this.mouseMoved = false;
-      Wall wallUnderCursor = getWallAt(getXLastMousePress(),
-          getYLastMousePress(), null);
-      List<Wall> selection = ((PlanComponent)getView()).getSelectedWalls();
-      // If the wall under the cursor doesn't belong to selection
-      if (!selection.contains(wallUnderCursor)) {
-        // Select only the wall under cursor position
-        selectWall(wallUnderCursor);
+      Object itemUnderCursor = getItemAt(getXLastMousePress(),
+          getYLastMousePress());
+      List<Object> selection = home.getSelectedItems();
+      // If the item under the cursor doesn't belong to selection
+      if (itemUnderCursor != null && !selection.contains(itemUnderCursor)) {
+        // Select only the item under cursor position
+        selectItem(itemUnderCursor);
       }
     }
 
     @Override
     public void moveMouse(float x, float y) {      
-      moveWalls(((PlanComponent)getView()).getSelectedWalls(), 
+      moveItems(home.getSelectedItems(), 
           x - this.xLastMouseMove, y - this.yLastMouseMove);
-      ((PlanComponent)getView()).ensurePointIsVisible(x, y);
+      ((PlanComponent)getView()).makePointVisible(x, y);
       this.xLastMouseMove = x;
       this.yLastMouseMove = y;
       this.mouseMoved = true;
@@ -880,14 +887,16 @@ public class PlanController implements Controller {
     public void releaseMouse(float x, float y) {
       if (this.mouseMoved) {
         // Post in undo support a move operation
-        postWallsMove(((PlanComponent)getView()).getSelectedWalls(),
+        postItemsMove(home.getSelectedItems(),
             this.xLastMouseMove - getXLastMousePress(), 
             this.yLastMouseMove - getYLastMousePress());
       } else {
-        // If mouse didn't move, select only the wall at (x,y)
-        Wall wallUnderCursor = getWallAt(x, y, null);
-        // Select only the wall under cursor position
-        selectWall(wallUnderCursor);
+        // If mouse didn't move, select only the item at (x,y)
+        Object itemUnderCursor = getItemAt(x, y);
+        if (itemUnderCursor != null) {
+          // Select only the item under cursor position
+          selectItem(itemUnderCursor);
+        }
       }
       // Change the state to SelectionState
       setState(getSelectionState());
@@ -897,7 +906,7 @@ public class PlanController implements Controller {
     public void escape() {
       if (this.mouseMoved) {
         // Put walls back to their initial position
-        moveWalls(((PlanComponent)getView()).getSelectedWalls(), 
+        moveItems(home.getSelectedItems(), 
             getXLastMousePress() - this.xLastMouseMove, 
             getYLastMousePress() - this.yLastMouseMove);
       }
@@ -912,8 +921,8 @@ public class PlanController implements Controller {
    * down.
    */
   private class RectangleSelectionState extends ControllerState {
-    private List<Wall> selectedWallsMousePressed;  
-    private boolean    mouseMoved;
+    private List<Object> selectedItemsMousePressed;  
+    private boolean      mouseMoved;
   
     @Override
     public Mode getMode() {
@@ -922,15 +931,15 @@ public class PlanController implements Controller {
 
     @Override
     public void enter() {
-      Wall wallUnderCursor = 
-        getWallAt(getXLastMousePress(), getYLastMousePress(), null);
+      Object itemUnderCursor = 
+        getItemAt(getXLastMousePress(), getYLastMousePress());
       // If no wall under cursor and shift wasn't down, deselect all
-      if (wallUnderCursor == null && !wasShiftDownLastMousePress()) {
+      if (itemUnderCursor == null && !wasShiftDownLastMousePress()) {
         deselectAll();
       } 
       // Store current selection
-      this.selectedWallsMousePressed = 
-        new ArrayList<Wall>(((PlanComponent)getView()).getSelectedWalls());
+      this.selectedItemsMousePressed = 
+        new ArrayList<Object>(home.getSelectedItems());
       this.mouseMoved = false;
     }
 
@@ -938,26 +947,26 @@ public class PlanController implements Controller {
     public void moveMouse(float x, float y) {
       this.mouseMoved = true;
       updateSelectedWalls(getXLastMousePress(), getYLastMousePress(), 
-          x, y, this.selectedWallsMousePressed);
+          x, y, this.selectedItemsMousePressed);
       // Update rectangle feedback
       ((PlanComponent)getView()).setRectangleFeedback(
           getXLastMousePress(), getYLastMousePress(), x, y);
-      ((PlanComponent)getView()).ensurePointIsVisible(x, y);
+      ((PlanComponent)getView()).makePointVisible(x, y);
     }
 
     @Override
     public void releaseMouse(float x, float y) {
       // If cursor didn't move
       if (!this.mouseMoved) {
-        Wall wallUnderCursor = getWallAt(x, y, null);
+        Object itemUnderCursor = getItemAt(x, y);
         // Toggle selection of the wall under cursor 
-        if (wallUnderCursor != null) {
-          if (this.selectedWallsMousePressed.contains(wallUnderCursor)) {
-            this.selectedWallsMousePressed.remove(wallUnderCursor);
+        if (itemUnderCursor != null) {
+          if (this.selectedItemsMousePressed.contains(itemUnderCursor)) {
+            this.selectedItemsMousePressed.remove(itemUnderCursor);
           } else {
-            this.selectedWallsMousePressed.add(wallUnderCursor);
+            this.selectedItemsMousePressed.add(itemUnderCursor);
           }
-          selectWalls(this.selectedWallsMousePressed);
+          selectItems(this.selectedItemsMousePressed);
         }
       }      
       // Change state to SelectionState
@@ -971,7 +980,7 @@ public class PlanController implements Controller {
 
     @Override
     public void exit() {
-      this.selectedWallsMousePressed = null;
+      this.selectedItemsMousePressed = null;
       ((PlanComponent)getView()).deleteRectangleFeedback();
     }
 
@@ -982,34 +991,34 @@ public class PlanController implements Controller {
      */
     private void updateSelectedWalls(float x0, float y0, 
                                      float x1, float y1,
-                                     List<Wall> selectedWallsMousePressed) {
-      List<Wall> selectedWalls;
+                                     List<Object> selectedItemsMousePressed) {
+      List<Object> selectedItems;
       boolean shiftDown = wasShiftDownLastMousePress();
       if (shiftDown) {
-        selectedWalls = new ArrayList<Wall>(selectedWallsMousePressed);
+        selectedItems = new ArrayList<Object>(selectedItemsMousePressed);
       } else {
-        selectedWalls = new ArrayList<Wall>();
+        selectedItems = new ArrayList<Object>();
       }
       
       // For all the walls that intersects with surrounding rectangle
-      for (Wall wall : plan.getWalls()) {
-        if (((PlanComponent)getView()).doesWallIntersectRectangle(wall, x0, y0, x1, y1)) {
+      for (Wall wall : home.getWalls()) {
+        if (wall.intersectsRectangle(x0, y0, x1, y1)) {
           // If shift was down at mouse press
           if (shiftDown) {
             // Toogle selection of the wall
-            if (selectedWallsMousePressed.contains(wall)) {
-              selectedWalls.remove(wall);
+            if (selectedItemsMousePressed.contains(wall)) {
+              selectedItems.remove(wall);
             } else {
-              selectedWalls.add(wall);
+              selectedItems.add(wall);
             }
-          } else if (!selectedWallsMousePressed.contains(wall)) {
+          } else if (!selectedItemsMousePressed.contains(wall)) {
             // Else select the wall
-            selectedWalls.add(wall);
+            selectedItems.add(wall);
           }
         }    
       }
       // Update selection
-      selectWalls(selectedWalls);
+      selectItems(selectedItems);
     }
   }
 
@@ -1048,21 +1057,21 @@ public class PlanController implements Controller {
    * New wall state. This state manages wall creation at each mouse press. 
    */
   private class NewWallState extends ControllerState {
-    private float      xStart;
-    private float      yStart;
-    private float      xLastEnd;
-    private float      yLastEnd;
-    private float      xLastMouseMove;
-    private float      yLastMouseMove;
-    private Wall       wallStartAtStart;
-    private Wall       wallEndAtStart;
-    private Wall       newWall;
-    private Wall       wallStartAtEnd;
-    private Wall       wallEndAtEnd;
-    private Wall       lastWall;
-    private JoinedWall joinedLastWall;
-    private List<Wall> oldSelection;
-    private boolean    magnetismEnabled;
+    private float        xStart;
+    private float        yStart;
+    private float        xLastEnd;
+    private float        yLastEnd;
+    private float        xLastMouseMove;
+    private float        yLastMouseMove;
+    private Wall         wallStartAtStart;
+    private Wall         wallEndAtStart;
+    private Wall         newWall;
+    private Wall         wallStartAtEnd;
+    private Wall         wallEndAtEnd;
+    private Wall         lastWall;
+    private JoinedWall   joinedLastWall;
+    private List<Object> oldSelection;
+    private boolean      magnetismEnabled;
     
     @Override
     public Mode getMode() {
@@ -1071,7 +1080,7 @@ public class PlanController implements Controller {
     
     @Override
     public void enter() {
-      this.oldSelection = ((PlanComponent)getView()).getSelectedWalls();
+      this.oldSelection = home.getSelectedItems();
       deselectAll();
       toggleMagnetism(wasShiftDownLastMousePress());
       this.xStart = getXLastMousePress();
@@ -1119,7 +1128,7 @@ public class PlanController implements Controller {
             xEnd, yEnd, this.wallStartAtStart, this.wallEndAtStart);
       } else {
         // Otherwise update its end point
-        plan.moveWallEndPointTo(this.newWall, xEnd, yEnd); 
+        home.moveWallEndPointTo(this.newWall, xEnd, yEnd); 
       }         
       
       // If the start or end line of a wall close to (xEnd, yEnd) is
@@ -1128,19 +1137,19 @@ public class PlanController implements Controller {
       if (this.wallStartAtEnd != null) {
         this.wallEndAtEnd = null;
         // Select the wall with a free start to display a feedback to user  
-        selectWall(this.wallStartAtEnd);          
+        selectItem(this.wallStartAtEnd);          
       } else {
         this.wallEndAtEnd = getWallEndAt(xEnd, yEnd, this.newWall);
         if (this.wallEndAtEnd != null) {
           // Select the wall with a free end to display a feedback to user  
-          selectWall(this.wallEndAtEnd);          
+          selectItem(this.wallEndAtEnd);          
         } else {
           deselectAll();
         }
       }
 
       // Ensure point at (x,y) is visible
-      ((PlanComponent)getView()).ensurePointIsVisible(x, y);
+      ((PlanComponent)getView()).makePointVisible(x, y);
       // Update move coordinates
       this.xLastEnd = xEnd;
       this.yLastEnd = yEnd;
@@ -1163,10 +1172,10 @@ public class PlanController implements Controller {
         // Create a new wall only when it will have a length > 0
         // meaning after the first mouse move
         if (this.newWall != null) {
-          selectWall(this.newWall);
+          selectItem(this.newWall);
           // Post wall creation to undo support
           this.joinedLastWall = postAddWall(this.newWall, this.oldSelection);
-          this.oldSelection = Arrays.asList(new Wall [] {this.newWall});
+          this.oldSelection = Arrays.asList(new Object [] {this.newWall});
           this.lastWall = 
           this.wallEndAtStart = this.newWall;
           this.wallStartAtStart = null;
@@ -1192,7 +1201,7 @@ public class PlanController implements Controller {
     @Override
     public void escape() {
       if (this.newWall != null) {
-        plan.deleteWall(this.newWall);
+        home.deleteWall(this.newWall);
       }
       // Change state to WallCreationState 
       setState(getWallCreationState());

@@ -1,7 +1,7 @@
 /*
- * PhotoRenderer.java 22 janv. 2009
+ * YafarayRenderer.java
  *
- * Sweet Home 3D, Copyright (c) 2009 Emmanuel PUYBARET / eTeks <info@eteks.com>
+ * Copyright (c) 2019 Emmanuel PUYBARET / eTeks <info@eteks.com>. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,16 +20,19 @@
 package com.eteks.sweethome3d.j3d;
 
 import java.awt.AlphaComposite;
+import java.awt.Color;
 import java.awt.EventQueue;
 import java.awt.Graphics2D;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
 import java.awt.image.ImageObserver;
 import java.awt.image.RenderedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -84,24 +87,14 @@ import javax.vecmath.TexCoord2f;
 import javax.vecmath.Vector3f;
 import javax.vecmath.Vector4f;
 
-import org.sunflow.PluginRegistry;
 import org.sunflow.SunflowAPI;
-import org.sunflow.core.Display;
-import org.sunflow.core.Instance;
 import org.sunflow.core.ParameterList;
 import org.sunflow.core.ParameterList.InterpolationType;
-import org.sunflow.core.light.SphereLight;
 import org.sunflow.core.light.SunSkyLight;
-import org.sunflow.core.primitive.TriangleMesh;
-import org.sunflow.image.Color;
-import org.sunflow.math.Matrix4;
-import org.sunflow.math.Point3;
-import org.sunflow.math.Vector3;
-import org.sunflow.system.UI;
-import org.sunflow.system.ui.SilentInterface;
 
 import com.eteks.sweethome3d.model.Camera;
 import com.eteks.sweethome3d.model.Compass;
+import com.eteks.sweethome3d.model.Content;
 import com.eteks.sweethome3d.model.Home;
 import com.eteks.sweethome3d.model.HomeEnvironment;
 import com.eteks.sweethome3d.model.HomeFurnitureGroup;
@@ -116,63 +109,123 @@ import com.eteks.sweethome3d.model.Selectable;
 import com.eteks.sweethome3d.model.Transformation;
 import com.eteks.sweethome3d.model.Wall;
 import com.eteks.sweethome3d.tools.OperatingSystem;
+import com.eteks.sweethome3d.tools.URLContent;
 import com.eteks.sweethome3d.viewcontroller.Object3DFactory;
 
 /**
- * A renderer able to create a photo realistic image of a home based on SunFlow rendering engine.
- * @author Emmanuel Puybaret
+ * A renderer implemented with YafaRay rendering engine called with JNI.
  */
-public class PhotoRenderer extends AbstractPhotoRenderer {
+public class YafarayRenderer extends AbstractPhotoRenderer {
+  private static String pluginsFolder;
+
+  static {
+    // To generate YafarayRenderer.h, use following command (classes folder contains compiled files of the plug-in)
+    // SweetHome3D project folder> javah -jni -o src/com/eteks/sweethome3d/j3d/YafarayRenderer.h -cp classes:lib/j3dcore.jar:lib/vecmath.jar com.eteks.sweethome3d.j3d.YafarayRenderer
+    //
+    // Plug-in based on YafaRay 3.5.1 + other changes retrieved with the command:
+    // > git clone -b v3.5.1 https://github.com/puybaret/libYafaRay.git
+    //
+    // To generate JNI DLL for Windows, read "YafaRay Windows 10 MinGW 64bit building - Standalone.txt" in Core-3.3.0\building (even if this plug-in uses YafaRay 3.4.2)
+    // Build YafaRay with current source code after setting "option(WITH_Freetype", "option(WITH_OpenEXR" "option(WITH_JPEG", "option(WITH_PNG", "option(WITH_TIFF", option(WITH_XMLImport, option(WITH_XML_LOADER, "option(WITH_OpenCV" to OFF in src\Core\CMakeLists.txt
+    // Copy yafa-dev64\build\yafaray_v3\bin\libyafaray_v3_core.dll + yafaray-plugins generated files and required DLLs listed below found in C:\msys64\mingw64\bin
+    // Run C:\mingw64\mingw64-shell.exe and use the following command (/C/Program Files/Java/jdk1.8.0_121 contains JDK)
+    // SweetHome3D project folder> g++.exe -I"/C/Program Files/Java/jdk1.8.0_121/include" -I"/C/Program Files/Java/jdk1.8.0_121/include/win32" -Iinclude/yafaray -I/C/msys64/mingw64/include src/com/eteks/sweethome3d/j3d/YafarayRenderer.cpp -shared -o lib/yafaray/windows/x64/libyafarayjni.dll -Llib/yafaray/windows/x64 -llibyafaray_v3_core
+    // Same instructions for i386 replacing "w64-x86_64" by "w64-i686" in dependent libraries instructions and with the following final command run in  C:\mingw64\mingw32-shell.exe:
+    // SweetHome3D project folder> g++.exe -m32 -Wl,--kill-at -I"/C/Program Files/Java/jdk1.8.0_121/include" -I"/C/Program Files/Java/jdk1.8.0_121/include/win32" -Iinclude/yafaray -I/C/msys64/mingw32/include src/com/eteks/sweethome3d/j3d/YafarayRenderer.cpp -shared -o lib/yafaray/windows/i386/libyafarayjni.dll -Llib/yafaray/windows/i386 -llibyafaray_v3_core
+    //
+    // To generate JNI DLL for macOS, read "YafaRay Debian Testing building - Standalone.txt" in Core-3.4.2\building, install Xcode 8.2 and boost library with command "brew install boost"
+    // Build YafaRay with current source code after setting "option(WITH_Freetype", "option(WITH_OpenEXR" "option(WITH_JPEG", "option(WITH_PNG", "option(WITH_TIFF", option(WITH_XMLImport, option(WITH_XML_LOADER, "option(WITH_OpenCV" to OFF in src\Core\CMakeLists.txt
+    // Copy yafa-dev/build/yafaray_v3/libyafaray_v3_core.dylib + yafaray-plugins generated files and required DLLs listed below
+    // Open Terminal window and use the following command (/Library/Java/JavaVirtualMachines/jdk1.8.0_202.jdk contains JDK)
+    // SweetHome3D project folder> clang++ -std=c++11 -mmacosx-version-min=10.9 -I/Library/Java/JavaVirtualMachines/jdk1.8.0_202.jdk/Contents/Home/include -I/Library/Java/JavaVirtualMachines/jdk1.8.0_202.jdk/Contents/Home/include/darwin -Iinclude/yafaray -arch x86_64 -dynamiclib -F/System/Library/Frameworks/JavaVM.framework/Versions/A/Frameworks/ -framework JavaNativeFoundation src/com/eteks/sweethome3d/j3d/YafarayRenderer.cpp -o lib/yafaray/macosx/libyafarayjni.dylib -Llib/yafaray/macosx -lyafaray_v3_core
+    // Same instructions for arm64 with -arch param updated to arm64 and dependencies to OpenJDK
+    // SweetHome3D project folder> clang++ -std=c++11 -I/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home/include -I/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home/include/darwin -Iinclude/yafaray -arch arm64 -dynamiclib -F/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home/lib -framework JavaNativeFoundation src/com/eteks/sweethome3d/j3d/YafarayRenderer.cpp -o lib/yafaray/macosx/libyafarayjni.dylib -Llib/yafaray/macosx -lyafaray_v3_core
+    // To obtain a libyafarayjni.dylib fat file, store libyafarayjni.dylib for x86_64 in libyafarayjni_x86_64.dylib and its arm64 version in libyafarayjni_arm64.dylib and run
+    // SweetHome3D project folder> lipo lib/yafaray/macosx/libyafarayjni_x86_64.dylib lib/yafaray/macosx/libyafarayjni_arm64.dylib -create -output lib/yafaray/macosx/libyafarayjni.dylib
+    //
+    // To generate JNI DLL for Linux, read "YafaRay Ubuntu 16.04 building - Standalone.txt" in Core-3.4.2\building (no need to install Python in LIBRARY DEPENDENCIES and stop after installing LIBRARY DEPENDENCIES)
+    // Build YafaRay with current source code after setting "option(WITH_Freetype", "option(WITH_OpenEXR" "option(WITH_JPEG", "option(WITH_PNG", "option(WITH_TIFF", option(WITH_XMLImport, option(WITH_XML_LOADER, "option(WITH_OpenCV" to OFF in src/Core/CMakeLists.txt
+    // Copy yafa-dev/build/yafaray_v3/libyafaray_v3_core.so + yafaray-plugins generated files and required DLLs listed below and found in /usr/lib/i386-linux-gnu
+    // Open Terminal window, run the command "sudo apt install openjdk-8-jdk-headless" and the following one (/usr/lib/jvm/java-8-openjdk-amd64/ contains JDK)
+    // SweetHome3D project folder> gcc -fPIC -std=c++11 -I/usr/lib/jvm/java-8-openjdk-amd64/include -I/usr/lib/jvm/java-8-openjdk-amd64/include/linux -Iinclude/yafaray src/com/eteks/sweethome3d/j3d/YafarayRenderer.cpp -shared -o lib/yafaray/linux/x64/libyafarayjni.so -Llib/yafaray/linux/x64 -lyafaray_v3_core
+    // Same instructions for i386 with the following final command:
+    // SweetHome3D project folder> gcc -fPIC -std=c++11 -I/usr/lib/jvm/java-8-openjdk-i386/include -I/usr/lib/jvm/java-8-openjdk-i386/include/linux -Iinclude/yafaray src/com/eteks/sweethome3d/j3d/YafarayRenderer.cpp -shared -o lib/yafaray/linux/i386/libyafarayjni.so -Llib/yafaray/linux/i386 -lyafaray_v3_core
+
+    try {
+      pluginsFolder = System.getProperty("com.eteks.sweethome3d.j3d.YafarayPluginsFolder");
+      if (pluginsFolder == null) {
+        String libraryPaths = System.getProperty("java.library.path", "");
+        String [] paths = libraryPaths.split(System.getProperty("path.separator"));
+        for (int i = 0; i < paths.length && pluginsFolder == null; i++) {
+          String path = paths [i];
+          for (File library : new File(path).listFiles()) {
+            if (!library.isDirectory()
+                && library.getName().indexOf("yafaray") >= 0) {
+              pluginsFolder = new File(path, "yafaray-plugins").getAbsolutePath();
+              break;
+            }
+          }
+        }
+      }
+
+      if (pluginsFolder != null) {
+        if (OperatingSystem.isWindows()) {
+          // Under Windows, use System.load rather than System.loadLibrary which doesn't work
+          // Change library loading order with great care because of dependencies (use Dependency Walker to check them)
+          String yafarayLibraryFolder = new File(pluginsFolder).getParent();
+          System.load(yafarayLibraryFolder + "\\libwinpthread-1.dll");
+          System.load(yafarayLibraryFolder + ("64".equals(System.getProperty("sun.arch.data.model")) ? "\\libgcc_s_seh-1.dll" : "\\libgcc_s_dw2-1.dll"));
+          System.load(yafarayLibraryFolder + "\\libstdc++-6.dll");
+          System.load(yafarayLibraryFolder + "\\libyafaray_v3_core.dll");
+          System.load(yafarayLibraryFolder + "\\libyafarayjni.dll");
+        } else {
+          System.loadLibrary("yafaray_v3_core");
+          System.loadLibrary("yafarayjni");
+        }
+      }
+    } catch (UnsatisfiedLinkError ex) {
+      // pluginDllsFolderPath will remain null
+      ex.printStackTrace();
+    }
+  }
+
   private final Object3DFactory object3dFactory;
 
   private int homeLightColor;
   private boolean useSunSky;
   private boolean useSunskyLight;
 
-  private SunflowAPI sunflow;
-  private String  sunSkyLightName;
-  private String  sunLightName;
-  private final Map<Selectable, String []>         homeItemsNames     = new HashMap<Selectable, String []>();
-  private final Map<TransparentTextureKey, String> textureImagesCache = new HashMap<TransparentTextureKey, String>();
-  private Thread renderingThread;
-
-  static {
-    // Ignore logs
-    UI.set(new SilentInterface());
-    // Use small triangles for better rendering
-    TriangleMesh.setSmallTriangles(true);
-    PluginRegistry.lightSourcePlugins.registerPlugin("sphere", SphereLightWithNoRepresentation.class);
-  }
+  private long environment;
+  private long scene;
+  private final Map<Selectable, String []> homeItemsNames = new HashMap<Selectable, String []>();
+  private final Map<TransparentTextureKey, String> texturesCache = new HashMap<TransparentTextureKey, String>();
 
   /**
    * Creates an instance ready to render the scene matching the given <code>home</code>.
-   * @throws IOException if texture image files required in the scene couldn't be created.
    */
-  public PhotoRenderer(Home home, Quality quality) throws IOException {
-    this(home, new PhotoObject3DFactory(), quality);
-  }
-
-  /**
-   * Creates an instance ready to render the scene matching the given <code>home</code>.
-   * @param home the home to render
-   * @param object3dFactory a factory able to create 3D objects from <code>home</code> items.
-   *            The {@link Object3DFactory#createObject3D(Home, Selectable, boolean) createObject3D} of
-   *            this factory is expected to return an instance of {@link Node} in current implementation.
-   */
-  public PhotoRenderer(Home home,
-                       Object3DFactory object3dFactory,
-                       Quality quality) throws IOException {
+  public YafarayRenderer(Home home,
+                         Object3DFactory object3dFactory,
+                         Quality quality) throws IOException {
     super(home, quality);
     if (object3dFactory == null) {
       object3dFactory = new PhotoObject3DFactory();
     }
     this.object3dFactory = object3dFactory;
 
+    synchronized (YafarayRenderer.class) {
+      // Synchronize with rendering abortion
+      this.environment = createEnvironment(pluginsFolder, "disabled" /* "disabled", "info" or "debug" */);
+    }
+  }
+
+  @Override
+  public boolean isAvailable() {
+    return this.environment != 0;
   }
 
   @Override
   public String getName() {
-    return "SunFlow";
+    return "YafaRay";
   }
 
   /**
@@ -180,20 +233,23 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
    * @throws IOException if texture image files required in the scene couldn't be created.
    */
   private void init() throws IOException {
-    this.sunflow = new SunflowAPI();
+    this.scene = createScene();
 
     Home home = getHome();
     this.useSunskyLight = !(home.getCamera() instanceof ObserverCamera);
     boolean silk = isSilkShaderUsed(getQuality());
+
 
     HomeEnvironment homeEnvironment = home.getEnvironment();
     float subpartSize = homeEnvironment.getSubpartSizeUnderLight();
     // Dividing walls and rooms surface in subparts is useless
     homeEnvironment.setSubpartSizeUnderLight(0);
 
-    // Export to SunFlow the Java 3D shapes and appearance of the ground, the walls, the furniture and the rooms
+    // Export to YafaRay the Java 3D shapes and appearance of the ground, the walls, the furniture and the rooms
     List<HomeLight> lights = new ArrayList<HomeLight>();
     for (Selectable item : home.getSelectableViewableItems()) {
+      checkCurrentThreadIsntInterrupted();
+
       if (item instanceof HomeFurnitureGroup) {
         for (HomePieceOfFurniture piece : ((HomeFurnitureGroup)item).getAllFurniture()) {
           if (!(piece instanceof HomeFurnitureGroup)) {
@@ -217,7 +273,10 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
         }
       }
     }
-    // Create a 3D ground large enough to join the sky at the horizon
+
+    checkCurrentThreadIsntInterrupted();
+
+    // Create a 3D ground large enough to join the sky at the horizon (caution: too large values may slow down rendering process)
     Ground3D ground = new Ground3D(home, -1E7f / 2, -1E7f / 2, 1E7f, 1E7f, true);
     Transform3D translation = new Transform3D();
     translation.setTranslation(new Vector3f(0, -0.1f, 0));
@@ -226,38 +285,46 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
     exportNode(groundTransformGroup, true, silk);
     homeEnvironment.setSubpartSizeUnderLight(subpartSize);
 
+    checkCurrentThreadIsntInterrupted();
+
+    HashMap<String, Object> params = new HashMap<String, Object>();
     HomeTexture skyTexture = homeEnvironment.getSkyTexture();
     this.useSunSky = skyTexture == null || this.useSunskyLight;
     if (!this.useSunSky) {
       // If observer camera is used with a sky texture,
       // create an image base light from sky texture
-      InputStream skyImageStream = skyTexture.getImage().openStream();
+      Content imageContent = skyTexture.getImage();
+      InputStream skyImageStream = imageContent.openStream();
       BufferedImage skyImage = ImageIO.read(skyImageStream);
       skyImageStream.close();
       // Create a temporary image base light twice as high that will contain sky image in the top part
       BufferedImage imageBaseLightImage = new BufferedImage(skyImage.getWidth(),
-          skyImage.getHeight() * 2, BufferedImage.TYPE_INT_RGB);
+          skyImage.getHeight() * 2, BufferedImage.TYPE_3BYTE_BGR);
       Graphics2D g2D = (Graphics2D)imageBaseLightImage.getGraphics();
       g2D.drawRenderedImage(skyImage, AffineTransform.getTranslateInstance(skyImage.getWidth() * skyTexture.getXOffset(), 0));
       g2D.drawRenderedImage(skyImage, AffineTransform.getTranslateInstance(skyImage.getWidth() * (skyTexture.getXOffset() - 1), 0));
       g2D.dispose();
-      File imageFile = OperatingSystem.createTemporaryFile("ibl", ".png");
-      ImageIO.write(imageBaseLightImage, "png", imageFile);
-      // Add it to images cache with a null key just to delete it
-      // with the other temporary images in dispose method
-      this.textureImagesCache.put(null, imageFile.getAbsolutePath());
 
-      this.sunflow.parameter("texture", imageFile.getAbsolutePath());
-      this.sunflow.parameter("center", new Vector3(-1, 0, 0));
-      this.sunflow.parameter("up", new Vector3(0, 1, 0));
-      this.sunflow.parameter("fixed", true);
-      this.sunflow.parameter("samples", 0);
-      this.sunflow.light(UUID.randomUUID().toString(), "ibl");
+      params.put("type", "image");
+      params.put("color_space", "sRGB");
+      params.put("width", imageBaseLightImage.getWidth());
+      params.put("height", imageBaseLightImage.getHeight());
+      byte [] imageData = ((DataBufferByte)imageBaseLightImage.getRaster().getDataBuffer()).getData();
+      params.put("channels", imageData.length / (imageBaseLightImage.getWidth() * imageBaseLightImage.getHeight()));
+      createTexture("backgroundImage", imageData, params);
+
+      params.put("type", "textureback");
+      params.put("mapping", "sphere");
+      params.put("texture", "backgroundImage");
+      params.put("ibl", false);
+      createBackground("background", params);
     }
+
+    checkCurrentThreadIsntInterrupted();
 
     // Set light settings
     int ceillingLightColor = homeEnvironment.getCeillingLightColor();
-    this.homeLightColor = homeEnvironment.getLightColor();
+    this.homeLightColor = home.getEnvironment().getLightColor();
     if (ceillingLightColor > 0) {
       // Add lights at the top of each room
       for (Room room : home.getRooms()) {
@@ -302,17 +369,21 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
             }
           }
 
-          float power = (float)Math.sqrt(room.getArea()) / 3;
-          this.sunflow.parameter("radiance", null,
-              power * (ceillingLightColor >> 16) / 0xD0 * (this.homeLightColor >> 16) / 255,
-              power * ((ceillingLightColor >> 8) & 0xFF) / 0xD0 * ((this.homeLightColor >> 8) & 0xFF) / 255,
-              power * (ceillingLightColor & 0xFF) / 0xD0 * (this.homeLightColor & 0xFF) / 255);
-          this.sunflow.parameter("center", new Point3(xCenter, roomHeight - 25, yCenter));
-          this.sunflow.parameter("radius", 20f);
-          this.sunflow.parameter("samples", 4);
-          this.sunflow.light(UUID.randomUUID().toString(), "sphere");
+          params.clear();
+          params.put("type", "spherelight");
+          params.put("color", new float [] {
+              (float)(ceillingLightColor >> 16) / 0xD0 * (this.homeLightColor >> 16) / 255f,
+              (float)((ceillingLightColor >> 8) & 0xFF) / 0xD0 * ((this.homeLightColor >> 8) & 0xFF) / 255f,
+              (float)(ceillingLightColor & 0xFF) / 0xD0 * (this.homeLightColor & 0xFF) / 255f, 1});
+          params.put("power", Math.sqrt(room.getArea()) / 3);
+          params.put("from", new float [] {xCenter, -yCenter, roomHeight - 25});
+          params.put("radius", 20f);
+          params.put("samples", 4);
+          createLight(UUID.randomUUID().toString(), params);
         }
       }
+
+      checkCurrentThreadIsntInterrupted();
     }
 
     final ModelManager modelManager = ModelManager.getInstance();
@@ -392,102 +463,52 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
           exportLightSources(light, lightTransform);
         }
       }
+
+      checkCurrentThreadIsntInterrupted();
     }
 
-    this.sunflow.parameter("depths.diffuse", Integer.parseInt(getRenderingParameterValue("diffusedBounces")));
-    this.sunflow.parameter("depths.reflection", 4);
-    this.sunflow.parameter("depths.refraction", 16);
-    this.sunflow.options(SunflowAPI.DEFAULT_OPTIONS);
-
-    Integer causticsEmit = new Integer(getRenderingParameterValue("causticsPhotons"));
-    if (causticsEmit > 0) {
-      this.sunflow.parameter("caustics.emit", causticsEmit);
-      this.sunflow.parameter("caustics", "kd");
-      this.sunflow.parameter("caustics.gather", 64);
-      this.sunflow.parameter("caustics.radius", 0.5f);
-      this.sunflow.options(SunflowAPI.DEFAULT_OPTIONS);
-    }
-
-    // Use a spiral computing
-    this.sunflow.parameter("bucket.size", 64);
-    this.sunflow.parameter("bucket.order", "spiral");
-    this.sunflow.options(SunflowAPI.DEFAULT_OPTIONS);
+    params.clear();
+    params.put("type", "none");
+    createIntegrator("volintegrator", params);
   }
 
   /**
-   * Renders home in <code>image</code> at the given <code>camera</code> location and image size.
-   * The rendered objects of the home are the same ones since last call to render or construction.
+   * Throws an exception if current thread is interrupted.
    */
-  public void render(final BufferedImage image,
-                     Camera camera,
-                     final ImageObserver observer) {
-    try {
-      render(image, camera, null, observer);
-    } catch (IOException ex) {
-      throw new RuntimeException(ex);
+  private void checkCurrentThreadIsntInterrupted() throws InterruptedIOException {
+    if (Thread.currentThread().isInterrupted()) {
+      throw new InterruptedIOException("Current thread interrupted");
     }
   }
 
-  /**
-   * Renders home in <code>image</code> at the given <code>camera</code> location and image size.
-   * The home objects listed in <code>updatedItems</code> will be updated in the renderer,
-   * allowing animations or modifications of their appearance.
-   */
   public void render(final BufferedImage image,
                      Camera camera,
                      List<? extends Selectable> updatedItems,
                      final ImageObserver observer) throws IOException {
-    if (this.sunflow == null) {
+    if (Thread.currentThread().isInterrupted()
+        || !isAvailable()) {
+      return;
+    }
+
+    if (this.scene == 0) {
+      init();
+    } else if (updatedItems != null) {
+      clearAll();
       init();
     }
 
-    this.renderingThread = Thread.currentThread();
+    HashMap<String, Object> params = new HashMap<String, Object>();
 
-    if (updatedItems != null) {
-      boolean silk = isSilkShaderUsed(getQuality());
-      for (Selectable item : updatedItems) {
-        // Remove from SunFlow updated objects
-        String [] itemNames = this.homeItemsNames.get(item);
-        if (itemNames != null) {
-          for (String name : itemNames) {
-            this.sunflow.remove(name);
-          }
-        }
-
-        Node node = (Node)this.object3dFactory.createObject3D(getHome(), item, true);
-        if (node != null) {
-          itemNames = exportNode(node, item instanceof Wall || item instanceof Room, silk);
-          this.homeItemsNames.put(item, itemNames);
-        }
-      }
+    if (this.useSunSky) {
+      deleteBackground("background");
     }
-
-    if (this.sunSkyLightName != null) {
-      this.sunflow.remove(this.sunSkyLightName);
-      this.sunSkyLightName = null;
-    }
-    if (this.sunLightName != null) {
-      this.sunflow.remove(this.sunLightName);
-      this.sunLightName = null;
-    }
-    // Possible values: default, path
-    String globalIllumination = getRenderingParameterValue("globalIllumination");
+    deleteLight("sun");
+    // Update Sun direction during daytime
     Compass compass = getHome().getCompass();
     float [] sunDirection = getSunDirection(compass, Camera.convertTimeToTimeZone(camera.getTime(), compass.getTimeZone()));
-    // Update Sun direction during daytime
+    float [] sunColor = null;
     if (sunDirection [1] > -0.075f) {
-      if (this.useSunSky) {
-        this.sunflow.parameter("up", new Vector3(0, 1, 0));
-        this.sunflow.parameter("east",
-            new Vector3((float)Math.sin(compass.getNorthDirection()), 0, (float)Math.cos(compass.getNorthDirection())));
-        this.sunflow.parameter("sundir", new Vector3(sunDirection [0], sunDirection [1], sunDirection [2]));
-        this.sunflow.parameter("turbidity", 6f);
-        this.sunflow.parameter("samples", this.useSunskyLight ? 12 : 0);
-        this.sunSkyLightName = UUID.randomUUID().toString();
-        this.sunflow.light(this.sunSkyLightName, "sunsky");
-      }
-
-      // Retrieve sun color
+      // Retrieve sun color with SunFlow (YafaRay ComputeAttenuatedSunlight is not accessible)
       SunSkyLight sunSkyLight = new SunSkyLight();
       ParameterList parameterList = new ParameterList();
       parameterList.addVectors("up", InterpolationType.NONE, new float [] {0, 1, 0});
@@ -495,64 +516,60 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
           new float [] {(float)Math.sin(compass.getNorthDirection()), 0, (float)Math.cos(compass.getNorthDirection())});
       parameterList.addVectors("sundir", InterpolationType.NONE,
           new float [] {sunDirection [0], sunDirection [1], sunDirection [2]});
-      sunSkyLight.update(parameterList, this.sunflow);
-      float [] sunColor = sunSkyLight.getSunColor().getRGB();
+      sunSkyLight.update(parameterList, new SunflowAPI());
+      sunColor = sunSkyLight.getSunColor().getRGB();
+
+      if (this.useSunSky) {
+        params.put("type", "sunsky");
+        params.put("from", new float [] {sunDirection [0], -sunDirection [2], sunDirection [1]});
+        params.put("turbidity", 6f);
+        params.put("power", 1.5f);
+        params.put("light_samples", 12);
+        params.put("background_light", this.useSunskyLight);
+        createBackground("background", params);
+      }
 
       // Simulate additional Sun with a faraway sphere light of a color depending of the hour of the day
-      int sunPower = this.useSunskyLight ? 10 : 40;
-      this.sunflow.parameter("radiance", null,
-          (this.homeLightColor >> 16) * sunPower * (float)Math.sqrt(sunColor [0]),
-          ((this.homeLightColor >> 8) & 0xFF) * sunPower * (float)Math.sqrt(sunColor [1]),
-          (this.homeLightColor & 0xFF) * sunPower * (float)Math.sqrt(sunColor [2]));
-      this.sunflow.parameter("center", new Point3(1000000 * sunDirection [0], 1000000 * sunDirection [1], 1000000 * sunDirection [2]));
-      this.sunflow.parameter("radius", 10000f);
-      this.sunflow.parameter("samples", 4);
-      this.sunLightName = UUID.randomUUID().toString();
-      this.sunflow.light(this.sunLightName, "sphere");
-
-      if (!this.useSunskyLight
-          && "default".equals(globalIllumination)) {
-        this.sunflow.parameter("gi.engine", "ambocc");
-        this.sunflow.parameter("gi.ambocc.bright", null, new float [] {1, 1, 1});
-        // Use complementary color
-        this.sunflow.parameter("gi.ambocc.dark", null,
-            new float [] {(sunColor [1] + sunColor [2]) / 200,
-                          (sunColor [0] + sunColor [2]) / 200,
-                          (sunColor [0] + sunColor [1]) / 200});
-        this.sunflow.parameter("gi.ambocc.samples", 1);
-        this.sunflow.options(SunflowAPI.DEFAULT_OPTIONS);
-      }
+      float sunPower = this.useSunskyLight ? 20 : 40;
+      params.clear();
+      params.put("type", "spherelight");
+      params.put("color", new float [] {
+          (float)(this.homeLightColor >> 16) * (float)Math.sqrt(sunColor [0]),
+          (float)((this.homeLightColor >> 8) & 0xFF) * (float)Math.sqrt(sunColor [1]),
+          (float)(this.homeLightColor & 0xFF) * (float)Math.sqrt(sunColor [2]), 1});
+      params.put("power", sunPower);
+      params.put("from", new float [] {1000000 * sunDirection [0], -1000000 * sunDirection [2], 1000000 * sunDirection [1]});
+      params.put("radius", 10000f);
+      params.put("samples", 4);
+      createLight("sun", params);
     }
 
-    if ("path".equals(globalIllumination)) {
-      this.sunflow.parameter("gi.engine", "path");
-      this.sunflow.parameter("gi.path.samples", 64);
-      this.sunflow.options(SunflowAPI.DEFAULT_OPTIONS);
+    String lightingMethod = getRenderingParameterValue("lightingMethod");
+    deleteIntegrator("integrator");
+    params.clear();
+    params.put("type", lightingMethod);
+    params.put("raydepth", 16);
+    params.put("shadowDepth", 4);
+    params.put("transpShad", true);
+    params.put("caustics", false);
+    if ("pathtracing".equals(lightingMethod)) {
+      params.put("bounces", Integer.parseInt(getRenderingParameterValue("diffusedBounces")));
     }
-
-    // Update camera lens
-    final String CAMERA_NAME = "camera";
-    switch (camera.getLens()) {
-      case SPHERICAL:
-        this.sunflow.camera(CAMERA_NAME, "spherical");
-        break;
-      case FISHEYE:
-        this.sunflow.camera(CAMERA_NAME, "fisheye");
-        break;
-      case NORMAL:
-        this.sunflow.parameter("focus.distance", new Float(getRenderingParameterValue("normalLens.focusDistance")));
-        this.sunflow.parameter("lens.radius", new Float(getRenderingParameterValue("normalLens.radius")));
-        this.sunflow.camera(CAMERA_NAME, "thinlens");
-        break;
-      case PINHOLE:
-      default:
-        this.sunflow.camera(CAMERA_NAME, "pinhole");
-        break;
+    if (!this.useSunskyLight
+        && sunDirection [1] > -0.075f
+        && "directlighting".equals(lightingMethod)) {
+      // params.put("caustics", true);
+      // Add ambient occlusion
+      params.put("AO_color",
+          new float [] {(sunColor [1] + sunColor [2]) / 100,
+                        (sunColor [0] + sunColor [2]) / 100,
+                        (sunColor [0] + sunColor [1]) / 100, 1f});
+      params.put("AO_distance", 1f);
+      params.put("AO_samples", 4);
+      params.put("do_AO", true);
     }
+    createIntegrator("integrator", params);
 
-    // Update camera location
-    Point3 eye = new Point3(camera.getX(), camera.getZ(), camera.getY());
-    Matrix4 transform;
     float yaw = camera.getYaw();
     float pitch;
     if (camera.getLens() == Camera.Lens.SPHERICAL) {
@@ -560,55 +577,80 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
     } else {
       pitch = camera.getPitch();
     }
-    double pitchCos = Math.cos(pitch);
-    if (Math.abs(pitchCos) > 1E-6) {
-      // Set the point the camera is pointed to
-      Point3 target = new Point3(
-          camera.getX() - (float)(Math.sin(yaw) * pitchCos),
-          camera.getZ() - (float)Math.sin(pitch),
-          camera.getY() + (float)(Math.cos(yaw) * pitchCos));
-      Vector3 up = new Vector3(0, 1, 0);
-      transform = Matrix4.lookAt(eye, target, up);
-    } else {
-      // Compute matrix directly when the camera points to top or bottom
-      transform = new Matrix4((float)-Math.cos(yaw), (float)-Math.sin(yaw), 0, camera.getX(),
-          0, 0, (float)Math.signum(Math.sin(pitch)), camera.getZ(),
-          (float)-Math.sin(yaw), (float)Math.cos(yaw), 0, camera.getY());
+    Transform3D transform = new Transform3D();
+    transform.rotZ(yaw);
+    Transform3D pitchRotation = new Transform3D();
+    pitchRotation.rotX(-pitch);
+    transform.mul(pitchRotation);
+    Point3f to = new Point3f(0, 100, 0);
+    transform.transform(to);
+    Point3f up = new Point3f(0, 0, 100);
+    transform.transform(up);
+
+    deleteCamera("camera");
+    params.clear();
+    params.put("from", new float [] {camera.getX(), -camera.getY(), camera.getZ()});
+    params.put("to", new float [] {camera.getX() + to.x, -camera.getY() - to.y, camera.getZ() + to.z});
+    params.put("up", new float [] {camera.getX() + up.x, -camera.getY() - up.y, camera.getZ() + up.z});
+    params.put("resx", image.getWidth());
+    params.put("resy", image.getHeight());
+    switch (camera.getLens()) {
+      case SPHERICAL:
+        params.put("type", "equirectangular");
+        break;
+      case FISHEYE:
+        params.put("type", "angular");
+        params.put("angle", 90f);
+        params.put("mirrored", true);
+        params.put("projection", "orthographic");
+        params.put("circular", true);
+        break;
+      case NORMAL:
+        params.put("dof_distance", new Float(getRenderingParameterValue("normalLens.focusDistance")));
+        params.put("aperture", new Float(getRenderingParameterValue("normalLens.radius")));
+        // No break
+      case PINHOLE:
+      default:
+        params.put("type", "perspective");
+        params.put("focal", (float)(0.5 / Math.tan(camera.getFieldOfView() / 2.)));
+        break;
     }
-    this.sunflow.parameter("transform", transform);
-    this.sunflow.parameter("fov", (float)Math.toDegrees(camera.getFieldOfView()));
-    this.sunflow.parameter("aspect", (float)image.getWidth() / image.getHeight());
-    // Update camera
-    this.sunflow.camera(CAMERA_NAME, null);
+    createCamera("camera", params);
 
-    // Set image size and quality
-    this.sunflow.parameter("resolutionX", image.getWidth());
-    this.sunflow.parameter("resolutionY", image.getHeight());
+    params.clear();
+    params.put("width", image.getWidth());
+    params.put("height", image.getHeight());
+    params.put("xstart", 0);
+    params.put("ystart", 0);
+    params.put("filter_type", getRenderingParameterValue("filter")); // mitchell, gauss, lanczos or box (default value)
+    if (camera.getLens() == Camera.Lens.NORMAL) {
+      params.put("AA_minsamples", Integer.parseInt(getRenderingParameterValue("antiAliasingNormalLens.min")));
+    } else {
+      params.put("AA_minsamples", Integer.parseInt(getRenderingParameterValue("antiAliasingOtherLens.min")));
+    }
+    params.put("color_space", "sRGB");
+    params.put("tile_size", 32);
+    params.put("camera_name", "camera");
+    params.put("integrator_name", "integrator");
+    params.put("volintegrator_name", "volintegrator");
+    params.put("background_name", "background");
+    // Set adv_shadow_bias_value to avoid light lines in ceiling corners
+    // Caution: using 1E-3 bias lower value can produce some shadow lines on some complex flat shapes
+    params.put("adv_auto_shadow_bias_enabled", false);
+    params.put("adv_shadow_bias_value", 5E-3f);
 
-    int antiAliasingMin = Integer.parseInt(getRenderingParameterValue("antiAliasing.min"));
-    int antiAliasingMax = Integer.parseInt(getRenderingParameterValue("antiAliasing.max"));
-    String filter = getRenderingParameterValue("filter");
-    this.sunflow.parameter("filter", filter);
-    this.sunflow.parameter("aa.min", antiAliasingMin);
-    this.sunflow.parameter("aa.max", antiAliasingMax);
-    String samplerAlgorithm = getRenderingParameterValue("samplerAlgorithm");
-    this.sunflow.parameter("sampler", samplerAlgorithm); // ipr, fast or bucket
-
-    // Render image with default camera
-    this.sunflow.parameter("camera", CAMERA_NAME);
-    this.sunflow.options(SunflowAPI.DEFAULT_OPTIONS);
-    this.sunflow.render(SunflowAPI.DEFAULT_OPTIONS, new BufferedImageDisplay(image, observer));
+    render(new BufferedImageOutput(observer, image), params);
   }
 
   /**
    * Stops the rendering process.
    */
   public void stop() {
-    if (this.renderingThread != null) {
-      if (!this.renderingThread.isInterrupted()) {
-        this.renderingThread.interrupt();
+    if (this.scene != 0) {
+      synchronized (YafarayRenderer.class) {
+        // Synchronize the creation of a new rendering session
+        abort();
       }
-      this.renderingThread = null;
     }
   }
 
@@ -616,20 +658,14 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
    * Disposes temporary data that may be required to run this renderer.
    * Trying to use this renderer after a call to this method may lead to errors.
    */
-  public void dispose() {
-    // Clean up temporary images
-    for (String imagePath : this.textureImagesCache.values()) {
-      new File(imagePath).delete();
-    }
-    this.textureImagesCache.clear();
+  public synchronized void dispose() {
+    this.texturesCache.clear();
   }
 
   /**
    * Returns <code>true</code> if silk shader should be used.
    */
   private boolean isSilkShaderUsed(Quality quality) {
-    // SunFlow produce too much white spots when silk shader is used with sun sky light
-    // so use this shader only when observer is used
     boolean silk = !this.useSunskyLight && quality == Quality.HIGH;
     String shininessShader = getRenderingParameterValue("shininessShader");
     if ("glossy".equals(shininessShader)) {
@@ -641,8 +677,8 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
   }
 
   /**
-   * Exports the given Java 3D <code>node</code> and its children with SunFlow API,
-   * then returns the SunFlow names that match this node.
+   * Exports the given Java 3D <code>node</code> and its children with YafaRay API,
+   * then returns the YafaRay mesh names that match this node.
    */
   private String [] exportNode(Node node, boolean ignoreTransparency, boolean silk) throws IOException {
     List<String> nodeNames = new ArrayList<String>();
@@ -651,7 +687,7 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
   }
 
   /**
-   * Exports all the 3D shapes children of <code>node</code> with SunFlow API.
+   * Exports all the 3D shapes children of <code>node</code> with YafaRay API.
    */
   private void exportNode(Node node,
                           boolean ignoreTransparency,
@@ -688,7 +724,7 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
         // Build a unique object name
         String uuid = UUID.randomUUID().toString();
 
-        String appearanceName = null;
+        String appearanceName = "default";
         TexCoordGeneration texCoordGeneration = null;
         Transform3D textureTransform = new Transform3D();
         int cullFace = PolygonAttributes.CULL_BACK;
@@ -704,7 +740,7 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
           if (textureAttributes != null) {
             textureAttributes.getTextureTransform(textureTransform);
           }
-          appearanceName = "shader" + uuid;
+          appearanceName = "material" + uuid;
           boolean mirror = shapeName != null
               && shapeName.startsWith(ModelManager.MIRROR_SHAPE_PREFIX);
           exportAppearance(appearance, appearanceName, mirror, ignoreTransparency, silk);
@@ -719,12 +755,6 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
               textureTransform, cullFace, backFaceNormalFlip, objectNameBase, appearanceName);
           if (objectsName != null) {
             for (String objectName : objectsName) {
-              if (appearanceName != null) {
-                this.sunflow.parameter("shaders", new String [] {appearanceName});
-              }
-              String instanceName = objectName + ".instance";
-              this.sunflow.instance(instanceName, objectName);
-              nodeNames.add(instanceName);
               nodeNames.add(objectName);
             }
           }
@@ -796,7 +826,7 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
             ? new float [geometryArray.getVertexCount() * 3]
             : null;
         // Store temporarily exported triangles to avoid to add their opposite triangles
-        // (SunFlow doesn't render correctly a face and its opposite)
+        // (YafaRay doesn't render correctly a face and its opposite)
         Set<Triangle> exportedTriangles = line
             ? null
             : new HashSet<Triangle>(geometryArray.getVertexCount());
@@ -926,11 +956,11 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
         }
 
         // Export lines, triangles or quadrilaterals according to the geometry
+        int [] uvsIndices = uvs != null
+            ? new int [verticesIndices.length]
+            : null;
         if (geometryArray instanceof IndexedGeometryArray) {
           int [] normalsIndices = normals != null
-              ? new int [verticesIndices.length]
-              : null;
-          int [] uvsIndices = uvs != null
               ? new int [verticesIndices.length]
               : null;
 
@@ -991,10 +1021,9 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
             }
           }
 
-          if (normalsIndices != null && !Arrays.equals(verticesIndices, normalsIndices)
-              || uvsIndices != null && !Arrays.equals(verticesIndices, uvsIndices)) {
+          if (normalsIndices != null && !Arrays.equals(verticesIndices, normalsIndices)) {
             // Remove indirection in verticesIndices, normals and uvsIndices
-            // because SunFlow uses only verticesIndices
+            // because YafaRay expects the same indices for vertices and normals
             float [] directVertices = new float [verticesIndices.length * 3];
             float [] directNormals =  normalsIndices != null
                 ? new float [verticesIndices.length * 3]
@@ -1020,6 +1049,7 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
                 indirectIndex = uvsIndices [i] * 2;
                 directUvs [uvIndex++] = uvs [indirectIndex++];
                 directUvs [uvIndex++] = uvs [indirectIndex++];
+                uvsIndices [i] = i;
               }
               verticesIndices [i] = i;
             }
@@ -1084,74 +1114,123 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
               }
             }
           }
+
+          if (uvsIndices != null) {
+            for (int i = 0; i < uvsIndices.length; i++) {
+              uvsIndices [i] = verticesIndices [i];
+            }
+          }
         }
 
         if (line) {
-          String [] objectNames = new String [verticesIndices.length / 2];
-          for (int startIndex = 0; startIndex < verticesIndices.length; startIndex += 2) {
-            String objectName = objectNameBase + "-" + startIndex;
-            objectNames [startIndex / 2] = objectName;
-
-            // Get points coordinates of a segment
-            float [] points = new float [6];
-            int pointIndex = 0;
-            for (int i = startIndex; i <= startIndex + 1; i++) {
-              int indirectIndex = verticesIndices [i] * 3;
-              points [pointIndex++] = vertices [indirectIndex++];
-              points [pointIndex++] = vertices [indirectIndex++];
-              points [pointIndex++] = vertices [indirectIndex];
-            }
-
-            // Create as many hairs as segments otherwise long hairs become invisible
-            this.sunflow.parameter("segments", 1);
-            this.sunflow.parameter("widths", 0.15f);
-            this.sunflow.parameter("points", "point", "vertex", points);
-            this.sunflow.geometry(objectName, "hair");
+          // Replace line segments by 0.15 wide triangles
+          float [] closeVertices = new float [verticesIndices.length * 3];
+          for (int i = 0, j = 0; i < verticesIndices.length; i += 2, j += 6) {
+            int index = 3 * verticesIndices [i];
+            int nextIndex = 3 * verticesIndices [i + 1];
+            Vector3f direction = new Vector3f(vertices [nextIndex] - vertices [index], vertices [nextIndex + 1] - vertices [index + 1], vertices [nextIndex + 2] - vertices [index + 2]);
+            Vector3f normal = direction.z == 0
+                ? new Vector3f(-direction.y, direction.x, 0)
+                : (direction.y == 0
+                     ? new Vector3f(-direction.z, 0, direction.x)
+                     : new Vector3f(-direction.y, direction.z, 0));
+            normal.normalize();
+            normal.scale(0.15f);
+            closeVertices [j] = vertices [index] + normal.x;
+            closeVertices [j + 1] = vertices [index + 1] + normal.y;
+            closeVertices [j + 2] = vertices [index + 2] + normal.z;
+            closeVertices [j + 3] = vertices [nextIndex] + normal.x;
+            closeVertices [j + 4] = vertices [nextIndex + 1] + normal.y;
+            closeVertices [j + 5] = vertices [nextIndex + 2] + normal.z;
           }
-          return objectNames;
+
+          // Based on code sequences programmed in xmlparser.cc
+          startGeometry();
+          int vertexCount = vertices.length / 3;
+          startTriMesh(-1, vertexCount + verticesIndices.length, verticesIndices.length, false, false, 0, 0);
+          for (int i = 0; i < vertices.length; i += 3) {
+            addVertex(vertices [i], vertices [i + 1], vertices [i + 2]);
+          }
+          for (int i = 0; i < closeVertices.length; i += 3) {
+            addVertex(closeVertices [i], closeVertices [i + 1], closeVertices [i + 2]);
+          }
+          for (int i = 0; i < verticesIndices.length; i += 2) {
+            // Create 2 triangles for each segment
+            addTriangle(vertexCount + i, vertexCount + i + 1, verticesIndices [i], appearanceName);
+            addTriangle(verticesIndices [i], verticesIndices [i + 1], vertexCount + i + 1, appearanceName);
+          }
+          endTriMesh();
+          endGeometry();
+
+          startGeometry();
+          smoothMesh(0, 180f);
+          endGeometry();
+
+          return new String [] {objectNameBase};
         } else {
-          int exportedTrianglesVertexCount = exportedTriangles.size() * 3;
-          if (exportedTrianglesVertexCount < verticesIndices.length) {
-            // Reduce verticesIndices array to contain only exported triangles
-            int [] tmp = new int [exportedTrianglesVertexCount];
-            System.arraycopy(verticesIndices, 0, tmp, 0, tmp.length);
-            verticesIndices = tmp;
-          }
-
-          this.sunflow.parameter("triangles", verticesIndices);
-          this.sunflow.parameter("points", "point", "vertex", vertices);
+          boolean normalsWithNoNaN = normals != null;
           if (normals != null) {
-            // Check there's no NaN values in normals to avoid endless loop in SunFlow
-            boolean noNaN = true;
+            // Check there's no NaN values in normals to avoid issues
             for (float val : normals) {
               if (Float.isNaN(val)) {
-                noNaN = false;
+                normalsWithNoNaN = false;
                 break;
               }
             }
-            if (noNaN)  {
-              this.sunflow.parameter("normals", "vector", "vertex", normals);
-            }
           }
-          if (uvs != null) {
-            // Check there's no huge values in uvs to avoid problems in SunFlow
-            boolean noHugeValues = true;
-            for (float val : uvs) {
-              if (Math.abs(val) > 1E9) {
-                noHugeValues = false;
-                break;
-              }
-            }
-            if (noHugeValues)  {
-              this.sunflow.parameter("uvs", "texcoord", "vertex", uvs);
-            }
+
+          startGeometry();
+          startTriMesh(-1, vertices.length / 3, verticesIndices.length / 3, false, uvs != null, 0, 0);
+          addTriangles(vertices, normals, uvs, verticesIndices, verticesIndices, appearanceName);
+          endTriMesh();
+          endGeometry();
+
+          if (!normalsWithNoNaN) {
+            // Generate missing normals
+            startGeometry();
+            smoothMesh(0, 90f);
+            endGeometry();
           }
-          this.sunflow.geometry(objectNameBase, "triangle_mesh");
           return new String [] {objectNameBase};
         }
       }
     }
     return null;
+  }
+
+  /**
+   * Applies to <code>vertex</code> the given transformation, and stores it in <code>vertices</code>.
+   */
+  @Override
+  void exportVertex(Transform3D transformationToParent,
+                    Point3f vertex, int index,
+                    float [] vertices) {
+    transformationToParent.transform(vertex);
+    index *= 3;
+    // Caution : Z-up Y-back in YafaRay
+    vertices [index++] = vertex.x;
+    vertices [index++] = -vertex.z;
+    vertices [index] = vertex.y;
+  }
+
+  /**
+   * Applies to <code>normal</code> the given transformation, and stores it in <code>normals</code>.
+   */
+  @Override
+  void exportNormal(Transform3D transformationToParent,
+                    Vector3f normal, int index,
+                    float [] normals,
+                    boolean backFaceNormalFlip) {
+    if (backFaceNormalFlip) {
+      normal.negate();
+    }
+    transformationToParent.transform(normal);
+
+    int i = index * 3;
+    // Caution : Z-up Y-back in YafaRay
+    normals [i++] = normal.x;
+    normals [i++] = -normal.z;
+    normals [i] = normal.y;
   }
 
   /**
@@ -1162,15 +1241,18 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
                                 boolean mirror,
                                 boolean ignoreTransparency,
                                 boolean silk) throws IOException {
+    HashMap<String, Object> params = new HashMap<String, Object>();
     Texture texture = appearance.getTexture();
     if (mirror) {
+      params.put("type", "shinydiffusemat");
       Material material = appearance.getMaterial();
+      Color3f color = new Color3f(0.9f, 0.9f, 0.9f);
       if (material != null) {
-        Color3f color = new Color3f();
         material.getDiffuseColor(color);
-        this.sunflow.parameter("color", null, new float [] {color.x, color.y, color.z});
       }
-      this.sunflow.shader(appearanceName, "mirror");
+      params.put("mirror_color", new float [] {color.x, color.y, color.z, 1});
+      params.put("specular_reflect", 1f);
+      createMaterial(appearanceName, params, new ArrayList<Map<String, Object>>());
     } else if (texture != null) {
       // Check shape transparency
       TransparencyAttributes transparencyAttributes = appearance.getTransparencyAttributes();
@@ -1184,59 +1266,138 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
       }
 
       TransparentTextureKey key = new TransparentTextureKey(texture, transparency);
-      String imagePath = this.textureImagesCache.get(key);
-      if (imagePath == null) {
+      String textureName = this.texturesCache.get(key);
+      if (textureName == null) {
+        textureName = "texture-" + appearanceName;
+        BufferedImage transferredImage;
         if (texture.getUserData() instanceof URL && transparency == 1) {
-          imagePath = texture.getUserData().toString();
+          URL userData = (URL)texture.getUserData();
+          URLContent textureContent = new URLContent(userData);
+          InputStream in = null;
+          try {
+            in = textureContent.openStream();
+            transferredImage = ImageIO.read(in);
+            if (transferredImage.getTransparency() != BufferedImage.OPAQUE) {
+              textureName = "transparent-" + textureName;
+            }
+          } finally {
+            if (in != null) {
+              in.close();
+            }
+          }
+          if (transferredImage.getType() != BufferedImage.TYPE_4BYTE_ABGR
+              && transferredImage.getType() != BufferedImage.TYPE_3BYTE_BGR
+              && transferredImage.getType() != BufferedImage.TYPE_BYTE_GRAY) {
+            // Convert to raster supported by createTextureFromImageData
+            BufferedImage convertedImage = new BufferedImage(transferredImage.getWidth(), transferredImage.getHeight(),
+                transferredImage.getTransparency() != BufferedImage.OPAQUE  ? BufferedImage.TYPE_4BYTE_ABGR  : BufferedImage.TYPE_3BYTE_BGR);
+            Graphics2D g2D = (Graphics2D)convertedImage.getGraphics();
+            g2D.drawRenderedImage(transferredImage, null);
+            g2D.dispose();
+            transferredImage = convertedImage;
+          }
         } else {
           ImageComponent2D imageComponent = (ImageComponent2D)texture.getImage(0);
           RenderedImage image = imageComponent.getRenderedImage();
+          // Compute a partially transparent image
+          transferredImage = new BufferedImage(image.getWidth(), image.getHeight(),
+              transparency < 1 || image.getColorModel().hasAlpha() ? BufferedImage.TYPE_4BYTE_ABGR : BufferedImage.TYPE_3BYTE_BGR);
+          Graphics2D g2D = (Graphics2D)transferredImage.getGraphics();
           if (transparency < 1) {
-            // Compute a partially transparent image
-            BufferedImage transparentImage = new BufferedImage(image.getWidth(),
-                image.getHeight(), BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g2D = (Graphics2D)transparentImage.getGraphics();
             g2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, transparency));
-            g2D.drawRenderedImage(image, null);
-            g2D.dispose();
-            image = transparentImage;
           }
-          File imageFile = OperatingSystem.createTemporaryFile("texture", ".png");
-          ImageIO.write(image, "png", imageFile);
-          imagePath = imageFile.getAbsolutePath();
+          g2D.drawRenderedImage(image, null);
+          g2D.dispose();
+          if (image.getColorModel().hasAlpha()) {
+            textureName = "transparent-" + textureName;
+          }
         }
-        this.textureImagesCache.put(key, imagePath);
+
+        params.put("type", "image");
+        params.put("color_space", "sRGB");
+        params.put("width", transferredImage.getWidth());
+        params.put("height", transferredImage.getHeight());
+        byte [] imageData = ((DataBufferByte)transferredImage.getRaster().getDataBuffer()).getData();
+        params.put("channels", imageData.length / (transferredImage.getWidth() * transferredImage.getHeight()));
+
+        checkCurrentThreadIsntInterrupted();
+
+        createTexture(textureName, imageData, params);
+
+        this.texturesCache.put(key, textureName);
       }
+
+      params.clear();
+      params.put("type", "shinydiffusemat");
+
+      boolean transparentTexture = textureName.startsWith("transparent-");
       Material material = appearance.getMaterial();
       float shininess;
+      String textureMaterialName = appearanceName;
       if (material != null
-          && (shininess = material.getShininess()) > 1) {
+          && (shininess = material.getShininess()) > 1
+          && !transparentTexture) {
         if (silk) {
-          this.sunflow.parameter("diffuse.texture", imagePath);
-          Color3f color = new Color3f();
-          material.getSpecularColor(color);
-          float [] specularColor = new float [] {
-              (float)Math.sqrt(color.x) / 2, (float)Math.sqrt(color.y) / 2, (float)Math.sqrt(color.z) / 2};
-          this.sunflow.parameter("specular", null, specularColor);
-          this.sunflow.parameter("glossyness", (float)Math.pow(10, -Math.log(shininess) / Math.log(5)));
-          this.sunflow.parameter("samples", 1);
-          this.sunflow.shader(appearanceName, "uber");
+          HashMap<String, Object> glossyParams = new HashMap<String, Object>();
+          shininess /= 128f;
+          glossyParams.put("type", "glossy");
+          glossyParams.put("glossy_reflect", shininess);
+          createMaterial(appearanceName + "-glossy", glossyParams, new ArrayList<Map<String,Object>>());
+          textureMaterialName += "-diffuse";
         } else {
-          this.sunflow.parameter("texture", imagePath);
-          this.sunflow.parameter("shiny", shininess / 512f);
-          this.sunflow.shader(appearanceName, "textured_shiny_diffuse");
+          shininess /= 512f;
+          params.put("specular_reflect", shininess);
+          params.put("mirror_color", new float [] {shininess, shininess, shininess, 1});
         }
+      }
+
+      params.put("diffuse_shader", "diffuse_layer");
+      Map<String, Object> textureMapLayerParams = new HashMap<String, Object>();
+      textureMapLayerParams.put("element", "shader_node");
+      textureMapLayerParams.put("name", "diffuse_layer");
+      textureMapLayerParams.put("type", "layer");
+      textureMapLayerParams.put("input", "textureMap");
+      Map<String, Object> textureMapTextureMapperParams = new HashMap<String, Object>();
+      textureMapTextureMapperParams.put("element", "shader_node");
+      textureMapTextureMapperParams.put("name", "textureMap");
+      textureMapTextureMapperParams.put("type", "texture_mapper");
+      textureMapTextureMapperParams.put("texco", "uv");
+      textureMapTextureMapperParams.put("texture", textureName);
+      if (transparentTexture) {
+        params.put("transparency_shader", "transparency_layer");
+        textureMapLayerParams.put("upper_color", new float [] {1, 1, 1, 1});
+        Map<String, Object> transparencyMapLayerParams = new HashMap<String, Object>();
+        transparencyMapLayerParams.put("element", "shader_node");
+        transparencyMapLayerParams.put("name", "transparency_layer");
+        transparencyMapLayerParams.put("type", "layer");
+        transparencyMapLayerParams.put("input", "transparencyMap");
+        transparencyMapLayerParams.put("negative", true);
+        transparencyMapLayerParams.put("use_alpha", true);
+        transparencyMapLayerParams.put("do_scalar", true);
+        Map<String, Object> transparencyMapTextureMapperParams = new HashMap<String, Object>();
+        transparencyMapTextureMapperParams.put("element", "shader_node");
+        transparencyMapTextureMapperParams.put("name", "transparencyMap");
+        transparencyMapTextureMapperParams.put("type", "texture_mapper");
+        transparencyMapTextureMapperParams.put("texco", "uv");
+        transparencyMapTextureMapperParams.put("texture", textureName);
+        createMaterial(textureMaterialName, params, Arrays.asList(textureMapLayerParams, textureMapTextureMapperParams, transparencyMapLayerParams, transparencyMapTextureMapperParams));
       } else {
-        this.sunflow.parameter("texture", imagePath);
-        this.sunflow.shader(appearanceName, "textured_diffuse");
+        createMaterial(textureMaterialName, params, Arrays.asList(textureMapLayerParams, textureMapTextureMapperParams));
+      }
+
+      if (!appearanceName.equals(textureMaterialName)) {
+        // Blend texture with glossy material
+        HashMap<String, Object> blendParams = new HashMap<String, Object>();
+        blendParams.put("type", "blend_mat");
+        blendParams.put("material1", appearanceName + "-diffuse");
+        blendParams.put("material2", appearanceName + "-glossy");
+        createMaterial(appearanceName, blendParams, new ArrayList<Map<String,Object>>());
       }
     } else {
       Material material = appearance.getMaterial();
       if (material != null) {
         Color3f color = new Color3f();
         material.getDiffuseColor(color);
-        float [] diffuseColor = new float [] {color.x, color.y, color.z};
-
         TransparencyAttributes transparencyAttributes = appearance.getTransparencyAttributes();
         if (transparencyAttributes != null
             && transparencyAttributes.getTransparency() > 0
@@ -1244,56 +1405,55 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
           if (material instanceof OBJMaterial
               && ((OBJMaterial)material).isOpticalDensitySet()) {
             float opticalDensity = ((OBJMaterial)material).getOpticalDensity();
-            // To avoid rendering issues in SunFlow, use glass ETA for optical density equal to 1
+            // To avoid rendering issues, use glass ETA for optical density equal to 1
             // (i.e. the index of refraction of vacuum that has no meaning for furniture parts)
-            this.sunflow.parameter("eta", opticalDensity <= 1f ?  1.55f  : opticalDensity);
+            params.put("IOR", opticalDensity <= 1f ?  1.55f  : opticalDensity);
           } else {
             // Use glass ETA as default
-            this.sunflow.parameter("eta", 1.55f);
+            params.put("IOR", 1.55f);
           }
           float transparency = 1 - transparencyAttributes.getTransparency();
-          this.sunflow.parameter("color", null,
-              new float [] {(1 - transparency) + transparency * diffuseColor [0],
-                            (1 - transparency) + transparency * diffuseColor [1],
-                            (1 - transparency) + transparency * diffuseColor [2]});
-          this.sunflow.parameter("absorption.color", null,
-              new float [] {transparency * (1 - diffuseColor [0]),
-                            transparency * (1 - diffuseColor [1]),
-                            transparency * (1 - diffuseColor [2])});
-          this.sunflow.shader(appearanceName, "glass");
+          params.put("type", "glass");
+          params.put("fake_shadows", true);
+          params.put("filter_color", new float [] {color.x, color.y, color.z, 1});
+          params.put("transmit_filter", transparency);
         } else if (material.getLightingEnable()) {
-          this.sunflow.parameter("diffuse", null, diffuseColor);
           float shininess = material.getShininess();
           if (shininess > 1) {
             if (silk) {
+              params.put("diffuse_color", new float [] {color.x, color.y, color.z, 1});
+              params.put("diffuse_reflect", 1.5f);
               material.getSpecularColor(color);
-              float [] specularColor = new float [] {
-                   (float)Math.sqrt(color.x) / 2, (float)Math.sqrt(color.y) / 2, (float)Math.sqrt(color.z) / 2};
-              this.sunflow.parameter("specular", null, specularColor);
-              this.sunflow.parameter("glossyness", (float)Math.pow(10, -Math.log(shininess) / Math.log(5)));
-              this.sunflow.parameter("samples", 1);
-              this.sunflow.shader(appearanceName, "uber");
+              params.put("color", new float [] {color.x, color.y, color.z, 1});
+              params.put("glossy_reflect", shininess / 256f);
+              params.put("exponent", 100f);
+              params.put("type", "glossy");
             } else {
-              this.sunflow.parameter("shiny", shininess / 512f);
-              this.sunflow.shader(appearanceName, "shiny_diffuse");
+              params.put("color", new float [] {color.x, color.y, color.z, 1});
+              params.put("specular_reflect", shininess / 512f);
+              params.put("mirror_color", new float [] {color.x, color.y, color.z, 1});
+              params.put("type", "shinydiffusemat");
             }
           } else {
-            this.sunflow.shader(appearanceName, "diffuse");
+            params.put("color", new float [] {color.x, color.y, color.z, 1});
+            params.put("type", "shinydiffusemat");
           }
         } else {
-          this.sunflow.parameter("color", null, diffuseColor);
-          this.sunflow.shader(appearanceName, "constant");
+          params.put("type", "light_mat");
+          params.put("color", new float [] {color.x, color.y, color.z, 1});
         }
+        createMaterial(appearanceName, params, new ArrayList<Map<String, Object>>());
       } else {
+        params.put("type", "light_mat");
         ColoringAttributes coloringAttributes = appearance.getColoringAttributes();
         if (coloringAttributes != null) {
           Color3f color = new Color3f();
           coloringAttributes.getColor(color);
-          this.sunflow.parameter("color", null, new float [] {color.x, color.y, color.z});
+          params.put("color", new float [] {color.x, color.y, color.z, 1});
         } else {
-          this.sunflow.parameter("color", null, new float [] {0, 0, 0});
+          params.put("color", new float [] {0, 0, 0, 1});
         }
-        this.sunflow.shader(appearanceName, "constant");
+        createMaterial(appearanceName, params, new ArrayList<Map<String, Object>>());
       }
     }
   }
@@ -1317,19 +1477,21 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
     float lightRadius = getLightSourceRadius(light, lightSource);
     float power = 5 * lightPower * lightPower / (lightRadius * lightRadius);
     int lightColor = lightSource.getColor();
-    this.sunflow.parameter("radiance", null,
-        power * (lightColor >> 16) * (this.homeLightColor >> 16),
-        power * ((lightColor >> 8) & 0xFF) * ((this.homeLightColor >> 8) & 0xFF),
-        power * (lightColor & 0xFF) * (this.homeLightColor & 0xFF));
+    HashMap<String, Object> params = new HashMap<String, Object>();
+    params.put("type", "spherelight");
+    params.put("color", new float [] {
+        (lightColor >> 16) * (this.homeLightColor >> 16),
+        ((lightColor >> 8) & 0xFF) * ((this.homeLightColor >> 8) & 0xFF),
+        (lightColor & 0xFF) * (this.homeLightColor & 0xFF), 1});
+    params.put("power", power);
     Point3f lightSourceLocation = getNormalizedLightSourceLocation(lightSource);
     lightTransform.transform(lightSourceLocation);
-    this.sunflow.parameter("center",
-        new Point3(lightSourceLocation.x,
-            lightSourceLocation.y,
-            lightSourceLocation.z));
-    this.sunflow.parameter("radius", lightRadius);
-    this.sunflow.parameter("samples", 4);
-    this.sunflow.light(UUID.randomUUID().toString(), "sphere");
+    params.put("from", new float [] {lightSourceLocation.getX(),
+        -lightSourceLocation.getZ(),
+        lightSourceLocation.getY()});
+    params.put("radius", lightRadius);
+    params.put("samples", 4);
+    createLight(UUID.randomUUID().toString(), params);
   }
 
   private float getLightSourceRadius(HomeLight light, LightSource lightSource) {
@@ -1343,78 +1505,56 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
   }
 
   /**
-   * A SunFlow display that updates an existing image.
-   * Implementation mostly copied from org.sunflow.system.ImagePanel.
+   * An image output that updates an existing image.
    */
-  private static final class BufferedImageDisplay implements Display {
+  private static final class BufferedImageOutput implements ImageOutput {
     private static final int BASE_INFO_FLAGS = ImageObserver.WIDTH | ImageObserver.HEIGHT | ImageObserver.PROPERTIES;
-    private static final int [] BORDERS = {Color.RED.toRGB(), Color.GREEN.toRGB(), Color.BLUE.toRGB(),
-                                           Color.YELLOW.toRGB(), Color.CYAN.toRGB(), Color.MAGENTA.toRGB(),
-                                           new Color(1, 0.5f, 0).toRGB(), new Color(0.5f, 1, 0).toRGB()};
-
+    private static final int [] BORDERS = {Color.RED.getRGB(), Color.GREEN.getRGB(), Color.BLUE.getRGB(),
+                                           Color.YELLOW.getRGB(), Color.CYAN.getRGB(), Color.MAGENTA.getRGB(),
+                                           new Color(1, 0.5f, 0).getRGB(), new Color(0.5f, 1, 0).getRGB()};
     private final ImageObserver observer;
     private final BufferedImage image;
+    private int areaNumber;
 
-    private BufferedImageDisplay(BufferedImage image, ImageObserver observer) {
+    private BufferedImageOutput(ImageObserver observer, BufferedImage image) {
       this.observer = observer;
       this.image = image;
     }
 
-    public synchronized void imageBegin(int width, int height, int bucketSize) {
-      for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-          int rgba = this.image.getRGB(x, y);
-          this.image.setRGB(x, y, ((rgba & 0xFEFEFEFE) >>> 1) + ((rgba & 0xFCFCFCFC) >>> 2));
-        }
-      }
-      notifyObserver(ImageObserver.FRAMEBITS | BASE_INFO_FLAGS, 0, 0, width, height);
+    public void setPixel(int x, int y, float r, float g, float b, float a, boolean hasAlpha) {
+      this.image.setRGB(x, y, new Color(Math.min(1, r), Math.min(1, g), Math.min(1, b), a).getRGB());
     }
 
-    public synchronized void imagePrepare(int x, int y, int width, int height, int id) {
-      int border = BORDERS [id % BORDERS.length] | 0xFF000000;
+    public void flushArea(int x0, int y0, int x1, int y1) {
+      notifyObserver(ImageObserver.SOMEBITS | BASE_INFO_FLAGS, x0, y0, x1 - x0, y1 - y0);
+    }
+
+    public void flush() {
+      notifyObserver(ImageObserver.FRAMEBITS | BASE_INFO_FLAGS, 0, 0, this.image.getWidth(), this.image.getHeight());
+    }
+
+    public void highlightArea(int x0, int y0, int x1, int y1) {
+      int width = x1 - x0;
+      int height = y1 - y0;
+      int border = BORDERS [areaNumber++ % BORDERS.length] | 0xFF000000;
       for (int by = 0; by < height; by++) {
         for (int bx = 0; bx < width; bx++) {
           if (bx < 2 || bx > width - 3) {
             if (5 * by < height || 5 * (height - by - 1) < height) {
-              this.image.setRGB(x + bx, y + by, border);
+              this.image.setRGB(x0 + bx, y0 + by, border);
             }
           } else if (by < 2 || by > height - 3) {
             if (5 * bx < width || 5 * (width - bx - 1) < width) {
-              this.image.setRGB(x + bx, y + by, border);
+              this.image.setRGB(x0 + bx, y0 + by, border);
             }
           }
         }
       }
-      notifyObserver(ImageObserver.SOMEBITS | BASE_INFO_FLAGS, x, y, width, height);
-    }
-
-    public synchronized void imageUpdate(int x, int y, int width, int height, Color [] data, float [] alpha) {
-      for (int j = 0, index = 0; j < height; j++) {
-        for (int i = 0; i < width; i++, index++) {
-          this.image.setRGB(x + i, y + j,
-              data [index].copy().mul(1.0f / alpha [index]).toNonLinear().toRGBA(alpha [index]));
-        }
-      }
-      notifyObserver(ImageObserver.SOMEBITS | BASE_INFO_FLAGS, x, y, width, height);
-    }
-
-    public synchronized void imageFill(int x, int y, int width, int height, Color c, float alpha) {
-      int rgba = c.copy().mul(1.0f / alpha).toNonLinear().toRGBA(alpha);
-      for (int j = 0; j < height; j++) {
-        for (int i = 0; i < width; i++) {
-          this.image.setRGB(x + i, y + j, rgba);
-        }
-      }
-      notifyObserver(ImageObserver.SOMEBITS | BASE_INFO_FLAGS, x, y, width, height);
-    }
-
-    public void imageEnd() {
-      notifyObserver(ImageObserver.FRAMEBITS | BASE_INFO_FLAGS,
-            0, 0, this.image.getWidth(), this.image.getHeight());
+      notifyObserver(ImageObserver.SOMEBITS | BASE_INFO_FLAGS, x0, y0, width, height);
     }
 
     private void notifyObserver(final int flags, final int x, final int y, final int width, final int height) {
-      if (observer != null) {
+      if (this.observer != null) {
         EventQueue.invokeLater(new Runnable() {
             public void run() {
               observer.imageUpdate(image, flags, x, y, width, height);
@@ -1424,12 +1564,68 @@ public class PhotoRenderer extends AbstractPhotoRenderer {
     }
   }
 
-  /**
-   * A SunFlow sphere light with no representation.
-   */
-  public static class SphereLightWithNoRepresentation extends SphereLight {
-    public Instance createInstance() {
-      return null;
-    }
+  // Native methods declarations which call YafaRay DLLs
+  private native long createEnvironment(String pluginsPath, String logLevel); // See logging.cc for logLevel
+
+  private native void createMaterial(String name, Map<String, Object> params, List<Map<String, Object>> eparams);
+
+  private native void createTexture(String name, byte [] imageData, Map<String, Object> params);
+
+  private native void createLight(String name, Map<String, Object> params);
+
+  private native boolean deleteLight(String name);
+
+  private native void createBackground(String name, Map<String, Object> params);
+
+  private native boolean deleteBackground(String name);
+
+  private native void createCamera(String name, Map<String, Object> params);
+
+  private native boolean deleteCamera(String name);
+
+  private native void createIntegrator(String name, Map<String, Object> params);
+
+  private native boolean deleteIntegrator(String name);
+
+  private native long createScene();
+
+  private native void abort();
+
+  private native void clearAll();
+
+  private native void startGeometry();
+
+  private native void endGeometry();
+
+  private native long startTriMesh(long id, int vertices, int triangles, boolean hasOrco, boolean hasUv, int type, int objectPassIndex);
+
+  private native void endTriMesh();
+
+  private native void addVertex(float x, float y, float z);
+
+  private native void addNormal(float x, float y, float z);
+
+  private native void addUV(float u, float v);
+
+  private native void addTriangle(int a, int b, int c, String materialName);
+
+  private native void addTriangle(int a, int b, int c, int uva, int uvb, int uvc, String materialName);
+
+  private native void addTriangles(float [] vertices, float [] normals, float uvs [], int [] triangleVertices, int [] triangleUvs, String materialName);
+
+  private native void smoothMesh(long id, float angleInDegree);
+
+  private native void render(ImageOutput imageOutput, Map<String, Object> params);
+
+  protected native void finalize();
+
+  private interface ImageOutput {
+    void setPixel(int x, int y, float r, float g, float b, float a, boolean hasAlpha);
+
+    void flushArea(int x0, int y0, int x1, int y1);
+
+    void flush();
+
+    void highlightArea(int x0, int y0, int x1, int y1);
   }
 }

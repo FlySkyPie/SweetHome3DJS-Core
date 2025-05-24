@@ -22,6 +22,8 @@ package com.eteks.sweethome3d.tools;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.math.BigInteger;
 import java.security.AccessControlException;
 import java.util.ArrayList;
@@ -33,11 +35,12 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
 
-import com.apple.eio.FileManager;
+// import com.apple.eio.FileManager;
 import com.eteks.sweethome3d.model.Home;
 
 /**
  * Tools used to test current user operating system.
+ * 
  * @author Emmanuel Puybaret
  */
 public class OperatingSystem {
@@ -116,6 +119,7 @@ public class OperatingSystem {
 
   /**
    * Returns <code>true</code> if current operating is Mac OS X 10.7 or superior.
+   * 
    * @since 4.1
    */
   public static boolean isMacOSXLionOrSuperior() {
@@ -125,6 +129,7 @@ public class OperatingSystem {
 
   /**
    * Returns <code>true</code> if current operating is Mac OS X 10.10 or superior.
+   * 
    * @since 4.5
    */
   public static boolean isMacOSXYosemiteOrSuperior() {
@@ -134,6 +139,7 @@ public class OperatingSystem {
 
   /**
    * Returns <code>true</code> if current operating is Mac OS X 10.13 or superior.
+   * 
    * @since 5.7
    */
   public static boolean isMacOSXHighSierraOrSuperior() {
@@ -143,15 +149,19 @@ public class OperatingSystem {
 
   /**
    * Returns <code>true</code> if current operating is Mac OS X 10.16 or superior.
+   * 
    * @since 6.5
    */
   public static boolean isMacOSXBigSurOrSuperior() {
     return isMacOSX()
         && compareVersions(System.getProperty("os.version"), "10.16") >= 0;
   }
+
   /**
-   * Returns <code>true</code> if the given version is greater than or equal to the version
+   * Returns <code>true</code> if the given version is greater than or equal to
+   * the version
    * of the current JVM.
+   * 
    * @since 4.0
    */
   public static boolean isJavaVersionGreaterOrEqual(String javaMinimumVersion) {
@@ -159,8 +169,11 @@ public class OperatingSystem {
   }
 
   /**
-   * Returns <code>true</code> if the version of the current JVM is greater or equal to the
-   * <code>javaMinimumVersion</code> and smaller than <code>javaMaximumVersion</code>.
+   * Returns <code>true</code> if the version of the current JVM is greater or
+   * equal to the
+   * <code>javaMinimumVersion</code> and smaller than
+   * <code>javaMaximumVersion</code>.
+   * 
    * @since 4.2
    */
   public static boolean isJavaVersionBetween(String javaMinimumVersion, String javaMaximumVersion) {
@@ -173,7 +186,8 @@ public class OperatingSystem {
     String javaVersion = System.getProperty("java.version");
     try {
       if ("OpenJDK Runtime Environment".equals(System.getProperty("java.runtime.name"))) {
-        // OpenJDK uses a different version system where updates are noted with a -uxx instead of _xx
+        // OpenJDK uses a different version system where updates are noted with a -uxx
+        // instead of _xx
         javaVersion = javaVersion.replace("-u", "_");
       }
     } catch (AccessControlException ex) {
@@ -183,13 +197,19 @@ public class OperatingSystem {
   }
 
   /**
-   * Returns a negative number if <code>version1</code> &lt; <code>version2</code>,
+   * Returns a negative number if <code>version1</code> &lt;
+   * <code>version2</code>,
    * 0 if <code>version1</code> = <code>version2</code>
    * and a positive number if <code>version1</code> &gt; <code>version2</code>.
-   * Version strings are first split into parts, each subpart ending at each punctuation, space
-   * or when a character of a different type is encountered (letter vs digit). Then each numeric
-   * or string subparts are compared to each other, strings being considered greater than null numbers
-   * and pre release strings (i.e. alpha, beta, rc). Examples:<pre>
+   * Version strings are first split into parts, each subpart ending at each
+   * punctuation, space
+   * or when a character of a different type is encountered (letter vs digit).
+   * Then each numeric
+   * or string subparts are compared to each other, strings being considered
+   * greater than null numbers
+   * and pre release strings (i.e. alpha, beta, rc). Examples:
+   * 
+   * <pre>
    * "" < "1"
    * "0" < "1.0"
    * "1.2beta" < "1.2"
@@ -217,13 +237,14 @@ public class OperatingSystem {
    * "1.2beta4" = "1.2 beta-4" (punctuation, space or missing punctuation doesn't influence result)
    * "1.2beta4" = "1,2,beta,4"
    * </pre>
+   * 
    * @since 4.0
    */
   public static int compareVersions(String version1, String version2) {
     List<Object> version1Parts = splitVersion(version1);
     List<Object> version2Parts = splitVersion(version2);
     int i = 0;
-    for ( ; i < version1Parts.size() || i < version2Parts.size(); i++) {
+    for (; i < version1Parts.size() || i < version2Parts.size(); i++) {
       Object version1Part = i < version1Parts.size()
           ? convertPreReleaseVersion(version1Parts.get(i))
           : BigInteger.ZERO; // Missing part is considered as 0
@@ -231,17 +252,18 @@ public class OperatingSystem {
           ? convertPreReleaseVersion(version2Parts.get(i))
           : BigInteger.ZERO;
       if (version1Part.getClass() == version2Part.getClass()) {
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        int comparison = ((Comparable)version1Part).compareTo(version2Part);
+        @SuppressWarnings({ "unchecked", "rawtypes" })
+        int comparison = ((Comparable) version1Part).compareTo(version2Part);
         if (comparison != 0) {
           return comparison;
         }
       } else if (version1Part instanceof String) {
-        // An integer subpart < 0 is smaller than a string (except for pre release strings)
-        return ((BigInteger)version2Part).signum() > 0 ? -1 : 1;
+        // An integer subpart < 0 is smaller than a string (except for pre release
+        // strings)
+        return ((BigInteger) version2Part).signum() > 0 ? -1 : 1;
       } else {
         // A string subpart is greater than an integer >= 0
-        return ((BigInteger)version1Part).signum() > 0 ? 1 : -1;
+        return ((BigInteger) version1Part).signum() > 0 ? 1 : -1;
       }
     }
     return 0;
@@ -255,16 +277,16 @@ public class OperatingSystem {
     StringBuilder subPart = new StringBuilder();
     // First split version with punctuation and space
     for (String part : version.split("\\p{Punct}|\\s")) {
-      for (int i = 0; i < part.length(); ) {
+      for (int i = 0; i < part.length();) {
         subPart.setLength(0);
         char c = part.charAt(i);
         if (Character.isDigit(c)) {
-          for ( ; i < part.length() && Character.isDigit(c = part.charAt(i)); i++) {
+          for (; i < part.length() && Character.isDigit(c = part.charAt(i)); i++) {
             subPart.append(c);
           }
           versionParts.add(new BigInteger(subPart.toString()));
         } else {
-          for ( ; i < part.length() && !Character.isDigit(c = part.charAt(i)); i++) {
+          for (; i < part.length() && !Character.isDigit(c = part.charAt(i)); i++) {
             subPart.append(c);
           }
           versionParts.add(subPart.toString());
@@ -275,12 +297,13 @@ public class OperatingSystem {
   }
 
   /**
-   * Returns negative values if the given version part matches a pre release (i.e. alpha, beta, rc)
+   * Returns negative values if the given version part matches a pre release (i.e.
+   * alpha, beta, rc)
    * or returns the parameter itself.
    */
   private static Object convertPreReleaseVersion(Object versionPart) {
     if (versionPart instanceof String) {
-      String versionPartString = (String)versionPart;
+      String versionPartString = (String) versionPart;
       if ("alpha".equalsIgnoreCase(versionPartString)) {
         return new BigInteger("-3");
       } else if ("beta".equalsIgnoreCase(versionPartString)) {
@@ -294,6 +317,7 @@ public class OperatingSystem {
 
   /**
    * Returns a temporary file that will be deleted when JVM will exit.
+   * 
    * @throws IOException if the file couldn't be created
    */
   public static File createTemporaryFile(String prefix, String suffix) throws IOException {
@@ -301,7 +325,8 @@ public class OperatingSystem {
     try {
       temporaryFolder = getDefaultTemporaryFolder(true);
     } catch (IOException ex) {
-      // In case creating default temporary folder failed, use default temporary files folder
+      // In case creating default temporary folder failed, use default temporary files
+      // folder
       temporaryFolder = null;
     }
     File temporaryFile = File.createTempFile(prefix, suffix, temporaryFolder);
@@ -310,29 +335,31 @@ public class OperatingSystem {
   }
 
   /**
-   * Returns a file comparator that sorts file names according to their version number (excluding their extension when they are the same).
+   * Returns a file comparator that sorts file names according to their version
+   * number (excluding their extension when they are the same).
    */
   public static Comparator<File> getFileVersionComparator() {
     return new Comparator<File>() {
-        public int compare(File file1, File file2) {
-          String fileName1 = file1.getName();
-          String fileName2 = file2.getName();
-          int extension1Index = fileName1.lastIndexOf('.');
-          String extension1 = extension1Index != -1  ? fileName1.substring(extension1Index)  : null;
-          int extension2Index = fileName2.lastIndexOf('.');
-          String extension2 = extension2Index != -1  ? fileName2.substring(extension2Index)  : null;
-          // If the files have the same extension, remove it
-          if (extension1 != null && extension1.equals(extension2)) {
-            fileName1 = fileName1.substring(0, extension1Index);
-            fileName2 = fileName2.substring(0, extension2Index);
-          }
-          return OperatingSystem.compareVersions(fileName1, fileName2);
+      public int compare(File file1, File file2) {
+        String fileName1 = file1.getName();
+        String fileName2 = file2.getName();
+        int extension1Index = fileName1.lastIndexOf('.');
+        String extension1 = extension1Index != -1 ? fileName1.substring(extension1Index) : null;
+        int extension2Index = fileName2.lastIndexOf('.');
+        String extension2 = extension2Index != -1 ? fileName2.substring(extension2Index) : null;
+        // If the files have the same extension, remove it
+        if (extension1 != null && extension1.equals(extension2)) {
+          fileName1 = fileName1.substring(0, extension1Index);
+          fileName2 = fileName2.substring(0, extension2Index);
         }
-      };
+        return OperatingSystem.compareVersions(fileName1, fileName2);
+      }
+    };
   }
 
   /**
-   * Deletes all the temporary files created with {@link #createTemporaryFile(String, String) createTemporaryFile}.
+   * Deletes all the temporary files created with
+   * {@link #createTemporaryFile(String, String) createTemporaryFile}.
    */
   public static void deleteTemporaryFiles() {
     try {
@@ -350,7 +377,8 @@ public class OperatingSystem {
   }
 
   /**
-   * Returns the default folder used to store temporary files created in the program.
+   * Returns the default folder used to store temporary files created in the
+   * program.
    */
   private synchronized static File getDefaultTemporaryFolder(boolean create) throws IOException {
     if (TEMPORARY_SUB_FOLDER != null) {
@@ -364,29 +392,31 @@ public class OperatingSystem {
       final File sessionTemporaryFolder = new File(temporaryFolder,
           versionPrefix + TEMPORARY_SESSION_SUB_FOLDER);
       if (!sessionTemporaryFolder.exists()) {
-        // Retrieve existing folders working with same Sweet Home 3D version in temporary folder
-        final File [] siblingTemporaryFolders = temporaryFolder.listFiles(new FileFilter() {
-            public boolean accept(File file) {
-              return file.isDirectory()
-                  && file.getName().startsWith(versionPrefix);
-            }
-          });
+        // Retrieve existing folders working with same Sweet Home 3D version in
+        // temporary folder
+        final File[] siblingTemporaryFolders = temporaryFolder.listFiles(new FileFilter() {
+          public boolean accept(File file) {
+            return file.isDirectory()
+                && file.getName().startsWith(versionPrefix);
+          }
+        });
 
         // Create temporary folder
         if (!createTemporaryFolders(sessionTemporaryFolder)) {
           throw new IOException("Can't create temporary folder " + sessionTemporaryFolder);
         }
 
-        // Launch a timer that updates modification date of the temporary folder each minute
+        // Launch a timer that updates modification date of the temporary folder each
+        // minute
         final long updateDelay = 60000;
         new Timer(true).schedule(new TimerTask() {
-            @Override
-            public void run() {
-              // Ensure modification date is always growing in case system time was adjusted
-              sessionTemporaryFolder.setLastModified(Math.max(System.currentTimeMillis(),
-                  sessionTemporaryFolder.lastModified() + updateDelay));
-            }
-          }, updateDelay, updateDelay);
+          @Override
+          public void run() {
+            // Ensure modification date is always growing in case system time was adjusted
+            sessionTemporaryFolder.setLastModified(Math.max(System.currentTimeMillis(),
+                sessionTemporaryFolder.lastModified() + updateDelay));
+          }
+        }, updateDelay, updateDelay);
 
         if (siblingTemporaryFolders != null
             && siblingTemporaryFolders.length > 0) {
@@ -394,27 +424,27 @@ public class OperatingSystem {
           final long deleteDelay = 10 * 60000;
           final long age = 7 * 24 * 3600000;
           new Timer(true).schedule(new TimerTask() {
-              @Override
-              public void run() {
-                long now = System.currentTimeMillis();
-                for (File siblingTemporaryFolder : siblingTemporaryFolders) {
-                  if (siblingTemporaryFolder.exists()
-                      && now - siblingTemporaryFolder.lastModified() > age) {
-                    delete(siblingTemporaryFolder);
-                  }
+            @Override
+            public void run() {
+              long now = System.currentTimeMillis();
+              for (File siblingTemporaryFolder : siblingTemporaryFolders) {
+                if (siblingTemporaryFolder.exists()
+                    && now - siblingTemporaryFolder.lastModified() > age) {
+                  delete(siblingTemporaryFolder);
                 }
               }
+            }
 
-              private void delete(File fileOrFolder) {
-                if (fileOrFolder.isDirectory()) {
-                  File [] files = fileOrFolder.listFiles();
-                  for (File file : files) {
-                    delete(file);
-                  }
+            private void delete(File fileOrFolder) {
+              if (fileOrFolder.isDirectory()) {
+                File[] files = fileOrFolder.listFiles();
+                for (File file : files) {
+                  delete(file);
                 }
-                fileOrFolder.delete();
               }
-            }, deleteDelay);
+              fileOrFolder.delete();
+            }
+          }, deleteDelay);
         }
       }
       return sessionTemporaryFolder;
@@ -424,7 +454,8 @@ public class OperatingSystem {
   }
 
   /**
-   * Creates the temporary folders in parameters and returns <code>true</code> if it was successful.
+   * Creates the temporary folders in parameters and returns <code>true</code> if
+   * it was successful.
    */
   private static boolean createTemporaryFolders(File temporaryFolder) {
     // Inspired from java.io.File#mkdirs
@@ -482,8 +513,24 @@ public class OperatingSystem {
    */
   private static class MacOSXFileManager {
     public static String getApplicationSupportFolder() throws IOException {
-      // Find application support folder (0x61737570) for user domain (-32763)
-      return FileManager.findFolder((short)-32763, 0x61737570);
+      try {
+        Class<?> fileManagerClass = Class.forName("com.apple.eio.FileManager");
+        Method findFolderMethod = fileManagerClass.getMethod("findFolder");
+        // Find application support folder (0x61737570) for user domain (-32763)
+        return (String) findFolderMethod.invoke(null, (short) -32763, 0x61737570);
+
+      } catch (ClassNotFoundException e) {
+        throw new IOException("macOS FileManager class not found: " + e.getMessage(), e);
+      } catch (NoSuchMethodException e) {
+        throw new IOException("macOS FileManager.findFolder method not found or signature mismatch: " + e.getMessage(),
+            e);
+      } catch (IllegalAccessException e) {
+        throw new IOException("Cannot access macOS FileManager.findFolder method: " + e.getMessage(), e);
+      } catch (InvocationTargetException e) {
+        throw new IOException(
+            "Error during macOS FileManager.findFolder execution: " + e.getTargetException().getMessage(),
+            e.getTargetException());
+      }
     }
   }
 }

@@ -1,5 +1,4 @@
-SWEET HOME 3D JS v 7.5.2
-------------------------
+# SWEET HOME 3D JS v 7.5.2
 
 This archive contains source code of Sweet Home 3D JS, a HTML5 3D viewer and editor
 for Sweet Home 3D files saved with version 5.3 or a more recent version.
@@ -15,9 +14,12 @@ or with the following SVN command:
 
 svn checkout https://svn.code.sf.net/p/sweethome3d/code/tags/V_7_5/SweetHome3D SweetHome3D
 
+## Requirement
 
-HOW TO USE THIS SOURCE CODE
----------------------------
+- Java8
+
+
+# HOW TO USE THIS SOURCE CODE
 
 JavaScript code of this project is compatible with HTML5 / WebGL, and the directory where
 you find this README.TXT file contains all the information required to run the code.

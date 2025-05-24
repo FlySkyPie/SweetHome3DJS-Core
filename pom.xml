@@ -42,7 +42,7 @@
 						<include>com/eteks/sweethome3d/model/**.java</include>
 						<include>com/eteks/sweethome3d/tools/**.java</include>
 						<include>com/eteks/sweethome3d/viewcontroller/**.java</include>
-						<include>com/eteks/sweethome3d/io</include>
+						<include>com/eteks/sweethome3d/io/**.java</include>
 					</includes>
 				</configuration>
 			</plugin>
@@ -71,7 +71,7 @@
 						<include>com/eteks/sweethome3d/model/**.java</include>
 						<include>com/eteks/sweethome3d/tools/**.java</include>
 						<include>com/eteks/sweethome3d/viewcontroller/**.java</include>
-						<include>com/eteks/sweethome3d/io</include>
+						<include>com/eteks/sweethome3d/io/**.java</include>
 					</includes>
 				</configuration>
 				<executions>
